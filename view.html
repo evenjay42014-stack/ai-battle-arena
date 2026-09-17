@@ -1,1 +1,144 @@
-PLACEHOLDER
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEXUS — AI Battle Arena</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b0f14; --card:#121821; --line:#243041; --text:#e8eef7; --muted:#9aacc0; --live:#3ddc97; --demo:#f0a500; --accent:#6ea8fe; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:radial-gradient(1200px 600px at 10% -10%, #1a2740, var(--bg)); color:var(--text); min-height:100vh; }
+    header { padding:28px 24px 8px; max-width:1100px; margin:0 auto; }
+    h1 { margin:0 0 6px; font-size:28px; letter-spacing:0.02em; }
+    p { margin:0; color:var(--muted); }
+    main { max-width:1100px; margin:0 auto; padding:16px 24px 40px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+    .wide { grid-column: 1 / -1; }
+    @media (max-width:800px) { main { grid-template-columns: 1fr; } }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); font-size:14px; }
+    th { color:var(--muted); font-weight:600; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .LIVE { background:rgba(61,220,151,.15); color:var(--live); }
+    .DEMO { background:rgba(240,165,0,.15); color:var(--demo); }
+    .approve { background:rgba(61,220,151,.15); color:var(--live); }
+    .revise { background:rgba(240,165,0,.15); color:var(--demo); }
+    .reject { background:rgba(255,90,90,.15); color:#ff7a7a; }
+    .muted { color:var(--muted); font-size:13px; }
+    code { background:#0a1018; padding:2px 6px; border-radius:6px; }
+    .feed-item { padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+    .metrics { display:flex; flex-wrap:wrap; gap:10px; }
+    .metric { background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-width:120px; }
+    .metric b { display:block; font-size:18px; color:var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>NEXUS — AI Battle Arena</h1>
+    <p>Standings · playbook learning · project review council</p>
+  </header>
+  <main>
+    <section class="card wide">
+      <h2 style="margin:0 0 12px; font-size:16px;">Learning metrics</h2>
+      <div class="metrics" id="metrics"><span class="muted">Loading…</span></div>
+    </section>
+    <section class="card">
+      <h2 style="margin:0 0 12px; font-size:16px;">Standings</h2>
+      <table>
+        <thead><tr><th>Elo</th><th>Δ</th><th>W-L</th><th>Mode</th><th>Fighter</th><th>Hole</th></tr></thead>
+        <tbody id="standings"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+      </table>
+      <p id="meta" class="muted" style="margin-top:12px;"></p>
+    </section>
+    <section class="card">
+      <h2 style="margin:0 0 12px; font-size:16px;">Recent battles</h2>
+      <div id="battles" class="muted">Loading…</div>
+    </section>
+    <section class="card wide">
+      <h2 style="margin:0 0 12px; font-size:16px;">Project reviews</h2>
+      <p class="muted" style="margin:0 0 10px;">
+        Polls <code>arena/data/reviews_index.json</code> (fallback <code>review_feed.jsonl</code>).
+        Submit: <code>python3 run_arena.py --review TARGET</code>
+      </p>
+      <div id="reviews" class="muted">Loading…</div>
+    </section>
+  </main>
+  <script>
+    async function jget(url) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(url + ' ' + res.status);
+      return res.json();
+    }
+    async function load() {
+      try {
+        const data = await jget('/arena/data/snapshot.json');
+        const tb = document.getElementById('standings');
+        tb.innerHTML = (data.standings || []).map(r => `
+          <tr>
+            <td>${Number(r.elo).toFixed(1)}</td>
+            <td>${r.elo_delta != null ? (r.elo_delta >= 0 ? '+' : '') + r.elo_delta : '—'}</td>
+            <td>${r.wins}-${r.losses}</td>
+            <td><span class="badge ${r.mode}">${r.mode}</span></td>
+            <td>${r.id}</td>
+            <td class="muted">${r.hole || ''}</td>
+          </tr>`).join('') || '<tr><td colspan="6" class="muted">No standings yet</td></tr>';
+        document.getElementById('meta').textContent =
+          `Snapshot ${data.ts || ''} · ${(data.battles||[]).length} battles · protocols ${(data.protocols_used||[]).length}`;
+        document.getElementById('battles').innerHTML = (data.battles || []).slice(-12).reverse().map(x =>
+          `<div class="feed-item"><strong>${x.protocol_name || x.protocol || ''}</strong> ${x.a} vs ${x.b} → <strong>${x.winner}</strong>
+           <span class="muted"> lessons=${(x.lessons||[]).length} ${x.judge_live ? 'judge:LIVE' : 'judge:heur'}</span></div>`
+        ).join('') || 'No battles yet';
+        const m = document.getElementById('metrics');
+        const sig = data.improvement_signals || {};
+        m.innerHTML = [
+          ['lessons_created', data.lessons_created ?? (data.lessons||[]).length],
+          ['playbook_size', data.playbook_size ?? (data.playbook||{}).playbook_size ?? '—'],
+          ['promoted', (data.playbook||{}).promoted_count ?? '—'],
+          ['avg lessons/battle', sig.avg_lessons_per_battle ?? '—'],
+          ['hole fights', sig.hole_protocol_fights ?? '—'],
+          ['judge live', data.judge_live_count ?? '—'],
+        ].map(([k,v]) => `<div class="metric"><b>${v}</b><span class="muted">${k}</span></div>`).join('');
+      } catch (e) {
+        document.getElementById('standings').innerHTML = `<tr><td colspan="6" class="muted">Could not load snapshot: ${e.message}</td></tr>`;
+      }
+    }
+    async function loadReviews() {
+      const el = document.getElementById('reviews');
+      if (!el) return;
+      try {
+        let rows = [];
+        let res = await fetch('/arena/data/reviews_index.json', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          rows = data.reviews || [];
+        } else {
+          res = await fetch('/arena/data/review_feed.jsonl', { cache: 'no-store' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const text = await res.text();
+          rows = text.trim().split('\n').filter(Boolean).map(l => {
+            try { return JSON.parse(l); } catch { return null; }
+          }).filter(Boolean).reverse();
+        }
+        el.innerHTML = rows.slice(0, 12).map(r => {
+          const dec = (r.decision || r.final_verdict || '?');
+          const shares = r.shares || {};
+          const shareTxt = ['approve','revise','reject']
+            .map(k => `${k[0]}=${Math.round((shares[k]||0)*100)}%`).join(' ');
+          return `<div class="feed-item">
+            <span class="badge ${dec}">${dec}</span>
+            <strong style="margin-left:8px;">${r.title || r.target || r.id}</strong>
+            <span class="muted"> · ${r.project_type || ''} · ${r.ts || ''}</span>
+            <div class="muted" style="margin-top:4px;">${shareTxt} · n=${r.n_reviews || '?'}</div>
+          </div>`;
+        }).join('') || 'No reviews yet — run <code>python3 run_arena.py --review samples/sample_project_brief.md</code>';
+      } catch (e) {
+        el.innerHTML = 'No review feed yet. Run <code>python3 run_arena.py --review TARGET</code> (' + e.message + ')';
+      }
+    }
+    load();
+    loadReviews();
+    setInterval(load, 5000);
+    setInterval(loadReviews, 5000);
+  </script>
+</body>
+</html>
