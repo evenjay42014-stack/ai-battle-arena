@@ -9,11 +9,15 @@ This does **not** update model weights. Learning here is playbook distillation, 
 ## Quick start
 
 ```bash
-python run_arena.py              # demo round-robin, print standings, write snapshot
+cp .env.example .env             # fill any provider keys you have
+python run_arena.py --live-check # [LIVE] or [DEMO] per provider; exit 0 if any LIVE
+python run_arena.py              # demo/live fight based on env, print standings, write snapshot
 python run_arena.py --serve      # command center at http://127.0.0.1:8765
 ```
 
-Open `web/index.html` after `--serve`. FIGHT runs one protocol. TOURNAMENT runs a showcase round-robin.
+Keys: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` / `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`. Never commit `.env`.
+
+Open `view.html` (or `web/index.html` if present) after `--serve`. Default run uses LIVE fighters when keys exist, otherwise DEMO personas.
 
 ## What is connected
 
