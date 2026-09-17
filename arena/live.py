@@ -10,21 +10,17 @@ from typing import Callable
 
 Timeout = 20
 
-# Keep probe candidates aligned with arena/agents.py direct + OpenRouter chat models.
-XAI_MODELS = ("grok-4.6", "grok-4.5", "grok-4.3", "grok-latest")
+# Keep probe lists aligned with arena/agents.py _DIRECT_MODELS / OpenRouter fallbacks.
+XAI_MODELS = ("grok-4.6", "grok-4.5", "grok-4.3")
+OPENAI_MODELS = ("gpt-4o-mini", "gpt-4.1-mini")
 ANTHROPIC_MODELS = (
     "claude-haiku-4-5-20251001",
-    "claude-haiku-4-5",
     "claude-sonnet-4-5-20250929",
+    "claude-3-haiku-20240307",
 )
-GOOGLE_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest")
-OPENAI_MODELS = ("gpt-4o-mini",)
-DEEPSEEK_MODELS = ("deepseek-chat",)
-OPENROUTER_PROBE_MODELS = (
-    "openai/gpt-4o-mini",
-    "meta-llama/llama-3.3-70b-instruct",
-    "openrouter/auto",
-)
+GOOGLE_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+DEEPSEEK_MODELS = ("deepseek-chat", "deepseek-flash")
+OPENROUTER_MODELS = ("openrouter/auto", "openai/gpt-4o-mini")
 
 
 def _redact(detail: str) -> str:
@@ -83,7 +79,7 @@ def check_openrouter() -> tuple[bool, str]:
     key = _key("OPENROUTER_API_KEY")
     if not key:
         return False, "OPENROUTER_API_KEY not set"
-    for model in OPENROUTER_PROBE_MODELS:
+    for model in OPENROUTER_MODELS:
         status, payload = _http_json(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -124,6 +120,10 @@ def check_openai() -> tuple[bool, str]:
         last_status, last_payload = status, payload
         if status == 200 and isinstance(payload, dict) and payload.get("choices"):
             return True, f"ok model={model}"
+        detail = payload if isinstance(payload, str) else json.dumps(payload)
+        if status in (400, 404) and "model" in str(detail).lower():
+            continue
+        break
     detail = last_payload if isinstance(last_payload, str) else json.dumps(last_payload)[:240]
     return False, _redact(f"HTTP {last_status}: {detail}")
 
@@ -168,7 +168,7 @@ def check_google() -> tuple[bool, str]:
         )
         status, payload = _http_json(
             url,
-            body={"contents": [{"parts": [{"text": "Reply with OK"}]}],}
+            body={"contents": [{"parts": [{"text": "Reply with OK"}]}]},
         )
         last_status, last_payload = status, payload
         if status == 200 and isinstance(payload, dict) and payload.get("candidates"):
@@ -195,6 +195,10 @@ def check_deepseek() -> tuple[bool, str]:
         last_status, last_payload = status, payload
         if status == 200 and isinstance(payload, dict) and payload.get("choices"):
             return True, f"ok model={model}"
+        detail = payload if isinstance(payload, str) else json.dumps(payload)
+        if status in (400, 404) and "model" in str(detail).lower():
+            continue
+        break
     detail = last_payload if isinstance(last_payload, str) else json.dumps(last_payload)[:240]
     return False, _redact(f"HTTP {last_status}: {detail}")
 
