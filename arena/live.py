@@ -115,22 +115,12 @@ def check_anthropic() -> tuple[bool, str]:
     key = _key("ANTHROPIC_API_KEY")
     if not key:
         return False, "ANTHROPIC_API_KEY not set"
-    status, payload = _http_json(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-        },
-        body={
-            "model": "claude-3-5-haiku-latest",
-            "max_tokens": 16,
-            "messages": [{"role": "user", "content": "Reply with OK"}],
-        },
-    )
-    if status == 200 and isinstance(payload, dict) and payload.get("content"):
-        return True, "ok model=claude-3-5-haiku-latest"
-    # Retry older alias if latest alias fails
-    if status in (400, 404):
+    last_status, last_payload = -1, ""
+    for model in (
+        "claude-haiku-4-5-20251001",
+        "claude-3-haiku-20240307",
+        "claude-sonnet-4-5-20250929",
+    ):
         status, payload = _http_json(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -138,15 +128,19 @@ def check_anthropic() -> tuple[bool, str]:
                 "anthropic-version": "2023-06-01",
             },
             body={
-                "model": "claude-3-5-haiku-20241022",
+                "model": model,
                 "max_tokens": 16,
                 "messages": [{"role": "user", "content": "Reply with OK"}],
             },
         )
+        last_status, last_payload = status, payload
         if status == 200 and isinstance(payload, dict) and payload.get("content"):
-            return True, "ok model=claude-3-5-haiku-20241022"
-    detail = payload if isinstance(payload, str) else json.dumps(payload)[:240]
-    return False, _redact(f"HTTP {status}: {detail}")
+            return True, f"ok model={model}"
+        detail = payload if isinstance(payload, str) else json.dumps(payload)
+        if status in (401, 403) or "credit" in detail.lower() or "balance" in detail.lower():
+            break
+    detail = last_payload if isinstance(last_payload, str) else json.dumps(last_payload)[:240]
+    return False, _redact(f"HTTP {last_status}: {detail}")
 
 
 def check_google() -> tuple[bool, str]:
@@ -154,14 +148,14 @@ def check_google() -> tuple[bool, str]:
     if not key:
         return False, "GOOGLE_API_KEY / GEMINI_API_KEY not set"
     last_status, last_payload = -1, ""
-    for model in ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"):
+    for model in ("gemini-3.6-flash", "gemini-2.5-flash", "gemini-flash-latest"):
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={key}"
         )
         status, payload = _http_json(
             url,
-            body={"contents": [{"parts": [{"text": "Reply with OK"}]}]},
+            body={"contents": [{"parts": [{"text": "Reply with OK"}]}],},
         )
         last_status, last_payload = status, payload
         if status == 200 and isinstance(payload, dict) and payload.get("candidates"):
