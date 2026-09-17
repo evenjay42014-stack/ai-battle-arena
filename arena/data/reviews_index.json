@@ -1,6 +1,20 @@
 {
-  "updated": "2026-09-17T09:22:10Z",
+  "updated": "2026-09-17T11:19:54Z",
   "reviews": [
+    {
+      "id": "2a936df0e6b2",
+      "ts": "2026-09-17T11:19:54Z",
+      "title": "ai-battle-arena",
+      "target": "/workspace/ai-battle-arena",
+      "project_type": "web_app",
+      "decision": "revise",
+      "shares": {
+        "approve": 0.5103,
+        "revise": 0.4897,
+        "reject": 0.0
+      },
+      "n_reviews": 6
+    },
     {
       "id": "5d7c0c1a6a00",
       "ts": "2026-09-17T09:22:10Z",
