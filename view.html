@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NEXUS — AI Battle Arena</title>
   <style>
-    :root { color-scheme: dark; --bg:#0b0f14; --card:#121821; --line:#243041; --text:#e8eef7; --muted:#9aacc0; --live:#3ddc97; --demo:#f0a500; --accent:#6ea8fe; }
+    :root { color-scheme: dark; --bg:#0b0f14; --card:#121821; --line:#243041; --text:#e8eef7; --muted:#9aacc0; --live:#3ddc97; --demo:#f0a500; --accent:#6ea8fe; --warn:#ff7a7a; }
     * { box-sizing: border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:radial-gradient(1200px 600px at 10% -10%, #1a2740, var(--bg)); color:var(--text); min-height:100vh; }
     header { padding:28px 24px 8px; max-width:1100px; margin:0 auto; }
@@ -26,18 +26,74 @@
     .reject { background:rgba(255,90,90,.15); color:#ff7a7a; }
     .muted { color:var(--muted); font-size:13px; }
     code { background:#0a1018; padding:2px 6px; border-radius:6px; }
-    .feed-item { padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+    .feed-item { padding:10px 0; border-bottom:1px solid var(--line); font-size:13px; }
     .metrics { display:flex; flex-wrap:wrap; gap:10px; }
     .metric { background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-width:120px; }
     .metric b { display:block; font-size:18px; color:var(--accent); }
+    textarea {
+      width:100%; min-height:88px; resize:vertical; background:#0a1018; color:var(--text);
+      border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit;
+    }
+    textarea:focus { outline:2px solid rgba(110,168,254,.35); border-color:var(--accent); }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+    button.fight {
+      background:linear-gradient(180deg, #3d6df0, #2a4fbf); color:#fff; border:0; border-radius:10px;
+      padding:10px 18px; font-weight:700; cursor:pointer; font-size:14px;
+    }
+    button.fight:disabled { opacity:.5; cursor:wait; }
+    .note {
+      margin-top:10px; padding:10px 12px; border-radius:10px; background:rgba(240,165,0,.08);
+      border:1px solid rgba(240,165,0,.35); color:var(--demo); font-size:13px;
+    }
+    .note.ok { background:rgba(61,220,151,.08); border-color:rgba(61,220,151,.35); color:var(--live); }
+    .note.err { background:rgba(255,90,90,.08); border-color:rgba(255,90,90,.35); color:var(--warn); }
+    details.battle { border-bottom:1px solid var(--line); padding:8px 0; }
+    details.battle summary { cursor:pointer; list-style:none; display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
+    details.battle summary::-webkit-details-marker { display:none; }
+    .pbp { margin-top:10px; background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:10px 12px; max-height:360px; overflow:auto; }
+    .pbp-beat { display:grid; grid-template-columns: 52px 1fr; gap:8px; padding:8px 0; border-bottom:1px solid #1a2330; font-size:12.5px; }
+    .pbp-beat:last-child { border-bottom:0; }
+    .pbp-t { color:var(--accent); font-weight:700; font-variant-numeric: tabular-nums; }
+    .pbp-tag { display:inline-block; min-width:72px; font-weight:700; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:.04em; }
+    select.proto {
+      background:#0a1018; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>NEXUS — AI Battle Arena</h1>
-    <p>Standings · playbook learning · project review council</p>
+    <p>4-fighter free-for-alls · dual judges · play-by-play · playbook learning</p>
   </header>
   <main>
+    <section class="card wide">
+      <h2 style="margin:0 0 8px; font-size:16px;">Command center — custom challenge</h2>
+      <p class="muted" style="margin-bottom:10px;">
+        Type a multi-constraint challenge. Live fights need
+        <code>python3 run_arena.py --serve</code> (POST <code>/api/battle</code>).
+        On static GitHub Pages the prompt bar is read-only and play-by-play still loads from <code>snapshot.json</code>.
+      </p>
+      <textarea id="prompt" placeholder="e.g. Design a 4-step checkout that survives 429s, never invents charge_id, and ends with ABORT_CONDITION=… Hard constraints only."></textarea>
+      <div class="row">
+        <select id="protocol" class="proto" title="Protocol">
+          <option value="">auto protocol</option>
+          <option value="logic_gauntlet">Logic Gauntlet</option>
+          <option value="code_coliseum">Code Coliseum</option>
+          <option value="knowledge_crossfire">Knowledge Crossfire</option>
+          <option value="debate_pit">Debate Pit</option>
+          <option value="constraint_forge">Constraint Forge</option>
+          <option value="instruction_siege">Instruction Siege</option>
+          <option value="planning_raid">Planning Raid</option>
+          <option value="robustness_pit">Robustness Pit</option>
+          <option value="pressure_cooker">Pressure Cooker</option>
+          <option value="alignment_trial">Alignment Trial</option>
+        </select>
+        <button class="fight" id="fightBtn" type="button">Fight (4-way FFA)</button>
+        <span class="muted" id="apiStatus">checking API…</span>
+      </div>
+      <div id="fightNote" class="note" style="display:none;"></div>
+    </section>
+
     <section class="card wide">
       <h2 style="margin:0 0 12px; font-size:16px;">Learning metrics</h2>
       <div class="metrics" id="metrics"><span class="muted">Loading…</span></div>
@@ -51,6 +107,11 @@
       <p id="meta" class="muted" style="margin-top:12px;"></p>
     </section>
     <section class="card">
+      <h2 style="margin:0 0 12px; font-size:16px;">Play-by-play</h2>
+      <p class="muted" style="margin:0 0 8px;">Expand a recent FFA for the full timeline (prompt → answers → judges → ranking → lessons).</p>
+      <div id="pbpPanel" class="muted">Loading…</div>
+    </section>
+    <section class="card wide">
       <h2 style="margin:0 0 12px; font-size:16px;">Recent battles</h2>
       <div id="battles" class="muted">Loading…</div>
     </section>
@@ -64,14 +125,75 @@
     </section>
   </main>
   <script>
+    let apiLive = false;
+
     async function jget(url) {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(url + ' ' + res.status);
       return res.json();
     }
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));
+    }
+
+    function renderPbp(beats) {
+      if (!beats || !beats.length) return '<div class="muted">No play-by-play stored for this battle.</div>';
+      return `<div class="pbp">${beats.map(b => {
+        const ev = b.event || '';
+        let body = '';
+        if (ev === 'prompt') body = `<span class="pbp-tag">Prompt</span> ${esc((b.text||'').slice(0,500))}`;
+        else if (ev === 'answer') body = `<span class="pbp-tag">Answer</span> <strong>${esc(b.fighter)}</strong> <span class="badge ${esc(b.mode||'DEMO')}">${esc(b.mode||'')}</span><div class="muted" style="margin-top:4px;white-space:pre-wrap;">${esc((b.text||'').slice(0,420))}</div>`;
+        else if (ev === 'judge') body = `<span class="pbp-tag">Judge ${esc(b.judge)}</span> ranking: <strong>${esc((b.ranking||[]).join(' › '))}</strong> · ${b.live ? 'LIVE' : 'heur'} <span class="muted">${esc(b.note||'')}</span>`;
+        else if (ev === 'disagreement') body = `<span class="pbp-tag">Split</span> <span style="color:var(--warn)">${esc(b.detail||'judges disagree')}</span>`;
+        else if (ev === 'ranking') body = `<span class="pbp-tag">Final</span> winner <strong>${esc(b.winner)}</strong> · ${esc((b.order||[]).join(' › '))}`;
+        else if (ev === 'lessons') body = `<span class="pbp-tag">Lessons</span> ${esc(b.count)} cards` +
+          ((b.items||[]).map(i => `<div class="muted">· ${esc(i.fighter_id)} [${esc(i.role)}] ${esc(i.rule)}</div>`).join(''));
+        else body = `<span class="pbp-tag">${esc(ev)}</span> ${esc(JSON.stringify(b).slice(0,200))}`;
+        return `<div class="pbp-beat"><div class="pbp-t">${String(b.t ?? '').padStart(2,'0')}</div><div>${body}</div></div>`;
+      }).join('')}</div>`;
+    }
+
+    function battleTitle(x) {
+      const names = x.fighters || [x.a, x.b, x.c, x.d].filter(Boolean);
+      const fmt = x.format === 'ffa4' || (names && names.length >= 4) ? 'FFA4' : '1v1';
+      return `${esc(x.protocol_name || x.protocol || '')} · ${fmt} · ${esc((names||[]).join(' / '))} → <strong>${esc(x.winner)}</strong>`;
+    }
+
+    async function probeApi() {
+      const status = document.getElementById('apiStatus');
+      const note = document.getElementById('fightNote');
+      const btn = document.getElementById('fightBtn');
+      try {
+        const res = await fetch('/api/snapshot', { cache: 'no-store' });
+        if (res.ok || res.status === 404) {
+          apiLive = true;
+          status.textContent = 'API online — live fights enabled';
+          status.style.color = 'var(--live)';
+          btn.disabled = false;
+          note.style.display = 'none';
+          return;
+        }
+        throw new Error('no api');
+      } catch {
+        apiLive = false;
+        status.textContent = 'static mode (no API)';
+        status.style.color = 'var(--demo)';
+        note.style.display = 'block';
+        note.className = 'note';
+        note.innerHTML = 'Static GitHub Pages cannot run fights. Start the command center with <code>python3 run_arena.py --serve</code> then open the local URL to use the prompt bar. Play-by-play below still renders from <code>arena/data/snapshot.json</code>.';
+        btn.disabled = false; // still clickable to show the note
+      }
+    }
+
     async function load() {
       try {
-        const data = await jget('arena/data/snapshot.json');
+        let data;
+        try {
+          data = await jget('/api/snapshot');
+        } catch {
+          data = await jget('arena/data/snapshot.json');
+        }
         const tb = document.getElementById('standings');
         tb.innerHTML = (data.standings || []).map(r => `
           <tr>
@@ -79,15 +201,28 @@
             <td>${r.elo_delta != null ? (r.elo_delta >= 0 ? '+' : '') + r.elo_delta : '—'}</td>
             <td>${r.wins}-${r.losses}</td>
             <td><span class="badge ${r.mode}">${r.mode}</span></td>
-            <td>${r.id}</td>
-            <td class="muted">${r.hole || ''}</td>
+            <td>${esc(r.id)}</td>
+            <td class="muted">${esc(r.hole || '')}</td>
           </tr>`).join('') || '<tr><td colspan="6" class="muted">No standings yet</td></tr>';
         document.getElementById('meta').textContent =
-          `Snapshot ${data.ts || ''} · ${(data.battles||[]).length} battles · protocols ${(data.protocols_used||[]).length}`;
-        document.getElementById('battles').innerHTML = (data.battles || []).slice(-12).reverse().map(x =>
-          `<div class="feed-item"><strong>${x.protocol_name || x.protocol || ''}</strong> ${x.a} vs ${x.b} → <strong>${x.winner}</strong>
-           <span class="muted"> lessons=${(x.lessons||[]).length} ${x.judge_live ? 'judge:LIVE' : 'judge:heur'}</span></div>`
-        ).join('') || 'No battles yet';
+          `Snapshot ${data.ts || ''} · ${(data.battles||[]).length} battles · format ${data.format || 'legacy'} · protocols ${(data.protocols_used||[]).length}`;
+
+        const battles = (data.battles || []).slice(-12).reverse();
+        document.getElementById('battles').innerHTML = battles.map(x => {
+          const dj = (x.disagreement && x.disagreement.winner_mismatch) ? ' · <span style="color:var(--warn)">judge split</span>' : '';
+          const jl = x.judge_live ? 'dual-judge:LIVE' : 'dual-judge:heur';
+          return `<div class="feed-item">${battleTitle(x)}
+            <span class="muted"> lessons=${(x.lessons||[]).length} ${jl}${dj}</span></div>`;
+        }).join('') || 'No battles yet';
+
+        document.getElementById('pbpPanel').innerHTML = battles.map((x, i) => `
+          <details class="battle" ${i===0?'open':''}>
+            <summary>${battleTitle(x)}
+              <span class="muted">hard=${esc(String(!!x.hard))} · ${(x.play_by_play||[]).length} beats</span>
+            </summary>
+            ${renderPbp(x.play_by_play)}
+          </details>`).join('') || 'No play-by-play yet — run a fight via the prompt bar or <code>python3 run_arena.py --quick</code>';
+
         const m = document.getElementById('metrics');
         const sig = data.improvement_signals || {};
         m.innerHTML = [
@@ -97,11 +232,14 @@
           ['avg lessons/battle', sig.avg_lessons_per_battle ?? '—'],
           ['hole fights', sig.hole_protocol_fights ?? '—'],
           ['judge live', data.judge_live_count ?? '—'],
+          ['judge splits', sig.judge_disagreements ?? '—'],
         ].map(([k,v]) => `<div class="metric"><b>${v}</b><span class="muted">${k}</span></div>`).join('');
       } catch (e) {
-        document.getElementById('standings').innerHTML = `<tr><td colspan="6" class="muted">Could not load snapshot: ${e.message}</td></tr>`;
+        document.getElementById('standings').innerHTML = `<tr><td colspan="6" class="muted">Could not load snapshot: ${esc(e.message)}</td></tr>`;
+        document.getElementById('pbpPanel').textContent = 'Could not load play-by-play: ' + e.message;
       }
     }
+
     async function loadReviews() {
       const el = document.getElementById('reviews');
       if (!el) return;
@@ -126,15 +264,60 @@
             .map(k => `${k[0]}=${Math.round((shares[k]||0)*100)}%`).join(' ');
           return `<div class="feed-item">
             <span class="badge ${dec}">${dec}</span>
-            <strong style="margin-left:8px;">${r.title || r.target || r.id}</strong>
-            <span class="muted"> · ${r.project_type || ''} · ${r.ts || ''}</span>
-            <div class="muted" style="margin-top:4px;">${shareTxt} · n=${r.n_reviews || '?'}</div>
+            <strong style="margin-left:8px;">${esc(r.title || r.target || r.id)}</strong>
+            <span class="muted"> · ${esc(r.project_type || '')} · ${esc(r.ts || '')}</span>
+            <div class="muted" style="margin-top:4px;">${shareTxt} · n=${esc(r.n_reviews || '?')}</div>
           </div>`;
         }).join('') || 'No reviews yet — run <code>python3 run_arena.py --review samples/sample_project_brief.md</code>';
       } catch (e) {
-        el.innerHTML = 'No review feed yet. Run <code>python3 run_arena.py --review TARGET</code> (' + e.message + ')';
+        el.innerHTML = 'No review feed yet. Run <code>python3 run_arena.py --review TARGET</code> (' + esc(e.message) + ')';
       }
     }
+
+    document.getElementById('fightBtn').addEventListener('click', async () => {
+      const note = document.getElementById('fightNote');
+      const btn = document.getElementById('fightBtn');
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!apiLive) {
+        note.style.display = 'block';
+        note.className = 'note';
+        note.innerHTML = 'Live fights need the local server: <code>python3 run_arena.py --serve</code>. Static Pages cannot POST to <code>/api/battle</code>.';
+        return;
+      }
+      if (!prompt) {
+        note.style.display = 'block';
+        note.className = 'note err';
+        note.textContent = 'Enter a challenge prompt first.';
+        return;
+      }
+      btn.disabled = true;
+      note.style.display = 'block';
+      note.className = 'note';
+      note.textContent = 'Running 4-fighter FFA with dual judges…';
+      try {
+        const body = { prompt, hard: true };
+        const proto = document.getElementById('protocol').value;
+        if (proto) body.protocol_id = proto;
+        const res = await fetch('/api/battle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        note.className = 'note ok';
+        note.innerHTML = `Winner <strong>${esc(data.winner)}</strong> · ranking ${esc((data.ranking||[]).join(' › '))}` +
+          ((data.disagreement && data.disagreement.winner_mismatch) ? ' · <span style="color:var(--warn)">judge split</span>' : '');
+        await load();
+      } catch (e) {
+        note.className = 'note err';
+        note.textContent = 'Fight failed: ' + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    probeApi();
     load();
     loadReviews();
     setInterval(load, 5000);
