@@ -210,6 +210,7 @@ def cmd_serve(port: int) -> int:
                             rows.append(json.loads(line))
                         except json.JSONDecodeError:
                             continue
+                # Also fall back to snapshot battles
                 if not rows:
                     snap_path = data_dir / "snapshot.json"
                     if snap_path.exists():
