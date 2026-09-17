@@ -1,6 +1,7 @@
 """Rebuild arena/data/playbook.json from gzip b64 chunk."""
 import base64, gzip
 from pathlib import Path
+# force-run: 1
 root = Path(__file__).resolve().parent
 b64 = (root / "_chunks/play_gz_0.txt").read_text().strip()
 out = root / "data" / "playbook.json"
