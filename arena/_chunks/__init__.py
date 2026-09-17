@@ -1,1 +1,1 @@
-"""Base64 chunks for large file sync."""
+"""Base64 file chunks."""
