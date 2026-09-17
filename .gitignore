@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .venv/
 .env
+arena/data/bus.json
+arena/data/reviews/*.json
