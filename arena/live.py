@@ -155,7 +155,7 @@ def check_google() -> tuple[bool, str]:
         )
         status, payload = _http_json(
             url,
-            body={"contents": [{"parts": [{"text": "Reply with OK"}]}],},
+            body={"contents": [{"parts": [{"text": "Reply with OK"}]}]},
         )
         last_status, last_payload = status, payload
         if status == 200 and isinstance(payload, dict) and payload.get("candidates"):
