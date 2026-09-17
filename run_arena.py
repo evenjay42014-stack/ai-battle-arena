@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""NEXUS AI Battle Arena CLI — optimize for learning rate."""
+"""NEXUS AI Battle Arena CLI — 4-fighter FFA, dual judges, command center API."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import http.server
 import socketserver
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from arena.env_loader import load_dotenv, repo_root
 from arena.live import run_live_checks
@@ -37,7 +39,7 @@ def cmd_tournament(
 
     roster = build_roster()
     live_n = sum(1 for f in roster if f.mode == "LIVE")
-    print(f"NEXUS learning tournament — {live_n}/{len(roster)} LIVE")
+    print(f"NEXUS FFA tournament — {live_n}/{len(roster)} LIVE · 4-fighter · dual judges")
     print("Goal: dense lessons + hole curriculum + persisted playbook")
     print(f"Protocols ({len(PROTOCOLS)}): " + ", ".join(p.name for p in PROTOCOLS))
     print("-" * 60)
@@ -49,7 +51,7 @@ def cmd_tournament(
         persist=True,
     )
     print("-" * 60)
-    print("Standings")
+    print("Standings (W = 1st place in FFA)")
     for row in snap["standings"]:
         d = row.get("elo_delta", 0)
         sign = "+" if d >= 0 else ""
@@ -64,7 +66,8 @@ def cmd_tournament(
         f"playbook_size={snap.get('playbook_size')}  "
         f"promoted={ (snap.get('playbook') or {}).get('promoted_count', 0) }  "
         f"avg_lessons/battle={sig.get('avg_lessons_per_battle')}  "
-        f"hole_fights={sig.get('hole_protocol_fights')}"
+        f"hole_fights={sig.get('hole_protocol_fights')}  "
+        f"judge_disagreements={sig.get('judge_disagreements')}"
     )
     print(
         f"protocols_used={len(snap.get('protocols_used') or [])}/10  "
@@ -80,8 +83,8 @@ def cmd_tournament(
 def cmd_fight_quick() -> int:
     from arena.engine import round_robin
 
-    snap = round_robin(limit_pairs=3, protocols_per_pair=1, persist=True)
-    print("NEXUS quick (3 pairs, still learns)")
+    snap = round_robin(limit_pairs=2, protocols_per_pair=1, persist=True)
+    print("NEXUS quick (2 FFA groups, still learns)")
     for row in snap["standings"]:
         print(
             f"{row['elo']:7.1f}  {row['wins']}-{row['losses']}  "
@@ -139,6 +142,7 @@ def cmd_reviews(limit: int = 15) -> int:
 def cmd_serve(port: int) -> int:
     root = repo_root()
     blocked = {".env", ".git"}
+    data_dir = root / "arena" / "data"
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -159,14 +163,117 @@ def cmd_serve(port: int) -> int:
             self.path = "/view.html"
             return self.send_head()
 
+        def _send_json(self, code: int, payload: dict | list) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_json_body(self) -> dict:
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError as e:
+                raise ValueError(f"invalid JSON: {e}") from e
+            if not isinstance(data, dict):
+                raise ValueError("JSON body must be an object")
+            return data
+
         def do_GET(self):
-            if self.path in ("/", ""):
+            parsed = urlparse(self.path)
+            path = parsed.path
+            if path in ("/", ""):
                 self.path = "/view.html"
+                return super().do_GET()
+            if path == "/api/snapshot":
+                snap_path = data_dir / "snapshot.json"
+                if not snap_path.exists():
+                    return self._send_json(404, {"error": "no snapshot yet"})
+                try:
+                    data = json.loads(snap_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    return self._send_json(500, {"error": "corrupt snapshot"})
+                return self._send_json(200, data)
+            if path == "/api/history":
+                hist = data_dir / "battles_history.jsonl"
+                rows: list[dict] = []
+                if hist.exists():
+                    for line in hist.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rows.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+                # Also fall back to snapshot battles
+                if not rows:
+                    snap_path = data_dir / "snapshot.json"
+                    if snap_path.exists():
+                        try:
+                            snap = json.loads(snap_path.read_text(encoding="utf-8"))
+                            rows = list(snap.get("battles") or [])
+                        except json.JSONDecodeError:
+                            pass
+                return self._send_json(200, {"battles": rows[-50:], "count": len(rows)})
+            if path == "/api/battle":
+                return self._send_json(
+                    405,
+                    {"error": "Use POST /api/battle with JSON {prompt, protocol_id?}"},
+                )
             return super().do_GET()
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/battle":
+                self.send_error(404, "Not Found")
+                return
+            try:
+                body = self._read_json_body()
+            except ValueError as e:
+                return self._send_json(400, {"error": str(e)})
+
+            prompt = (body.get("prompt") or "").strip()
+            if not prompt:
+                return self._send_json(400, {"error": "prompt is required"})
+            protocol_id = body.get("protocol_id") or None
+            fighter_ids = body.get("fighter_ids") or None
+            hard = body.get("hard", True)
+
+            try:
+                from arena.engine import run_custom_battle
+
+                out = run_custom_battle(
+                    prompt,
+                    protocol_id=protocol_id,
+                    fighter_ids=fighter_ids,
+                    hard=bool(hard),
+                )
+            except Exception as e:  # noqa: BLE001
+                return self._send_json(500, {"error": str(e)})
+
+            battle = out["battle"]
+            return self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "battle": battle,
+                    "winner": battle.get("winner"),
+                    "ranking": battle.get("ranking"),
+                    "play_by_play": battle.get("play_by_play"),
+                    "disagreement": battle.get("disagreement"),
+                    "standings": (out.get("snapshot") or {}).get("standings"),
+                },
+            )
 
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("127.0.0.1", port), Handler) as httpd:
         print(f"NEXUS command center http://127.0.0.1:{port}/view.html")
+        print("  API: POST /api/battle  GET /api/snapshot  GET /api/history")
         print("  .env and directory listing are blocked")
         try:
             httpd.serve_forever()
@@ -177,18 +284,20 @@ def cmd_serve(port: int) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
-    p = argparse.ArgumentParser(description="NEXUS — AI Battle Arena (learning-rate optimized)")
+    p = argparse.ArgumentParser(
+        description="NEXUS — AI Battle Arena (4-fighter FFA, dual judges)"
+    )
     p.add_argument("--live-check", action="store_true", help="Probe providers")
-    p.add_argument("--serve", action="store_true", help="Hardened static server")
+    p.add_argument("--serve", action="store_true", help="Command center + battle API")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--review", metavar="TARGET", help="Council review: path, URL, or brief text/file")
     p.add_argument("--reviews", action="store_true", help="List recent project reviews")
     p.add_argument("--review-max", type=int, default=None, help="Cap fighters for a review (smoke)")
     p.add_argument("--tournament", action="store_true", help="Full learning stress suite (default)")
-    p.add_argument("--quick", action="store_true", help="3-pair smoke (still persists playbook)")
-    p.add_argument("--all-protocols", action="store_true", help="Each pair × all 10 (expensive)")
+    p.add_argument("--quick", action="store_true", help="2-group FFA smoke (still persists playbook)")
+    p.add_argument("--all-protocols", action="store_true", help="Each group × all 10 (expensive)")
     p.add_argument("--protocols-per-pair", type=int, default=1)
-    p.add_argument("--limit-pairs", type=int, default=None)
+    p.add_argument("--limit-pairs", type=int, default=None, help="Limit FFA groups (alias)")
     args = p.parse_args(argv)
 
     if args.live_check:
