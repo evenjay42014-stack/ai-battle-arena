@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
@@ -75,7 +74,7 @@ _OPENROUTER_MODELS: dict[str, str] = {
     "openai": "openai/gpt-4o-mini",
     "google": "google/gemini-flash-1.5",
     "deepseek": "deepseek/deepseek-chat",
-    "openrouter": "openrouter/auto",
+    "openrouter": "meta-llama/llama-3.1-8b-instruct",
 }
 
 
@@ -85,6 +84,12 @@ def _env_key(names: list[str]) -> str:
         if v:
             return v
     return ""
+
+
+def _compose_user(prompt: str, playbook_context: str | None) -> str:
+    if playbook_context and playbook_context.strip():
+        return f"{playbook_context.strip()}\n\n---\nTASK:\n{prompt}"
+    return prompt
 
 
 @dataclass
@@ -104,11 +109,19 @@ class Fighter:
     def label(self) -> str:
         return f"[{self.mode}] {self.id}"
 
-    def answer(self, prompt: str) -> str:
+    def answer(
+        self,
+        prompt: str,
+        *,
+        playbook_context: str | None = None,
+        system: str | None = None,
+    ) -> str:
         """Demo policy: deterministic persona-flavored reply."""
         tip = f"(spike={self.spike}, hole={self.hole})"
+        sys_bit = f" sys={system[:60]}…" if system else ""
+        pb = " with-playbook" if playbook_context else ""
         return (
-            f"{self.id} [{self.mode}] {self.style}. "
+            f"{self.id} [{self.mode}]{pb}{sys_bit} {self.style}. "
             f"On: {prompt[:120]}… {tip}"
         )
 
@@ -116,32 +129,42 @@ class Fighter:
 class LiveFighter(Fighter):
     """Calls OpenRouter when available, else matching direct provider."""
 
-    def answer(self, prompt: str) -> str:
+    def answer(
+        self,
+        prompt: str,
+        *,
+        playbook_context: str | None = None,
+        system: str | None = None,
+    ) -> str:
+        user = _compose_user(prompt, playbook_context)
         or_key = _env_key(["OPENROUTER_API_KEY"])
         if or_key:
-            text = self._chat_openrouter(or_key, prompt)
+            text = self._chat_openrouter(or_key, user, system=system)
             if text is not None:
                 return text
-        direct = self._chat_direct(prompt)
+        direct = self._chat_direct(user, system=system)
         if direct is not None:
             return direct
-        # Fall back to demo-style reply without flipping mode mid-fight.
-        return super().answer(prompt) + " [live call failed → demo fallback]"
+        return (
+            super().answer(prompt, playbook_context=playbook_context, system=system)
+            + " [live call failed → demo fallback]"
+        )
 
-    def _chat_openrouter(self, key: str, prompt: str) -> str | None:
+    def _chat_openrouter(self, key: str, prompt: str, *, system: str | None = None) -> str | None:
         model = _OPENROUTER_MODELS.get(self.provider, "openrouter/auto")
         return _openai_compat(
             "https://openrouter.ai/api/v1/chat/completions",
             key,
             model,
             prompt,
+            system=system,
             extra_headers={
                 "HTTP-Referer": "https://github.com/local/ai-battle-arena",
                 "X-Title": "NEXUS AI Battle Arena",
             },
         )
 
-    def _chat_direct(self, prompt: str) -> str | None:
+    def _chat_direct(self, prompt: str, *, system: str | None = None) -> str | None:
         p = self.provider
         if p == "openai":
             key = _env_key(["OPENAI_API_KEY"])
@@ -152,6 +175,7 @@ class LiveFighter(Fighter):
                 key,
                 "gpt-4o-mini",
                 prompt,
+                system=system,
             )
         if p == "deepseek":
             key = _env_key(["DEEPSEEK_API_KEY"])
@@ -162,6 +186,7 @@ class LiveFighter(Fighter):
                 key,
                 "deepseek-chat",
                 prompt,
+                system=system,
             )
         if p == "xai":
             key = _env_key(["XAI_API_KEY"])
@@ -172,16 +197,17 @@ class LiveFighter(Fighter):
                 key,
                 "grok-4.6",
                 prompt,
+                system=system,
             )
         if p == "anthropic":
-            return _anthropic_chat(prompt)
+            return _anthropic_chat(prompt, system=system)
         if p == "google":
-            return _google_chat(prompt)
+            return _google_chat(prompt, system=system)
         if p == "openrouter":
             key = _env_key(["OPENROUTER_API_KEY"])
             if not key:
                 return None
-            return self._chat_openrouter(key, prompt)
+            return self._chat_openrouter(key, prompt, system=system)
         return None
 
 
@@ -191,21 +217,23 @@ def _openai_compat(
     model: str,
     prompt: str,
     *,
+    system: str | None = None,
     extra_headers: dict[str, str] | None = None,
+    max_tokens: int = 280,
 ) -> str | None:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
-    body = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 256,
-    }
+    messages: list[dict[str, str]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens}
     try:
         req = urllib.request.Request(
             url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
         )
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         choices = data.get("choices") or []
         if not choices:
@@ -216,15 +244,17 @@ def _openai_compat(
         return None
 
 
-def _anthropic_chat(prompt: str) -> str | None:
+def _anthropic_chat(prompt: str, *, system: str | None = None) -> str | None:
     key = _env_key(["ANTHROPIC_API_KEY"])
     if not key:
         return None
-    body = {
+    body: dict[str, Any] = {
         "model": "claude-3-5-haiku-latest",
-        "max_tokens": 256,
+        "max_tokens": 280,
         "messages": [{"role": "user", "content": prompt}],
     }
+    if system:
+        body["system"] = system
     headers = {
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
@@ -237,7 +267,7 @@ def _anthropic_chat(prompt: str) -> str | None:
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         parts = data.get("content") or []
         texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
@@ -247,7 +277,7 @@ def _anthropic_chat(prompt: str) -> str | None:
         return None
 
 
-def _google_chat(prompt: str) -> str | None:
+def _google_chat(prompt: str, *, system: str | None = None) -> str | None:
     key = _env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY"])
     if not key:
         return None
@@ -256,7 +286,9 @@ def _google_chat(prompt: str) -> str | None:
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={key}"
     )
-    body = {"contents": [{"parts": [{"text": prompt}]}]}
+    body: dict[str, Any] = {"contents": [{"parts": [{"text": prompt}]}]}
+    if system:
+        body["systemInstruction"] = {"parts": [{"text": system}]}
     try:
         req = urllib.request.Request(
             url,
@@ -264,7 +296,7 @@ def _google_chat(prompt: str) -> str | None:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         cands = data.get("candidates") or []
         if not cands:
@@ -305,3 +337,83 @@ def build_roster(*, prefer_live: bool = True) -> list[Fighter]:
             )
         )
     return roster
+
+
+def chat_completion_any(
+    prompt: str,
+    *,
+    system: str | None = None,
+    prefer_providers: list[str] | None = None,
+) -> tuple[str | None, str]:
+    """Best-effort chat via OpenRouter or first available direct provider.
+
+    Returns (text, route_label). Used for LIVE judging.
+    """
+    prefer = prefer_providers or ["openrouter", "openai", "anthropic", "google", "xai", "deepseek"]
+    or_key = _env_key(["OPENROUTER_API_KEY"])
+    if "openrouter" in prefer and or_key:
+        text = _openai_compat(
+            "https://openrouter.ai/api/v1/chat/completions",
+            or_key,
+            "openai/gpt-4o-mini",
+            prompt,
+            system=system,
+            max_tokens=120,
+            extra_headers={
+                "HTTP-Referer": "https://github.com/local/ai-battle-arena",
+                "X-Title": "NEXUS AI Battle Arena Judge",
+            },
+        )
+        if text:
+            return text, "openrouter:openai/gpt-4o-mini"
+    for p in prefer:
+        if p == "openrouter":
+            continue
+        if p == "openai":
+            key = _env_key(["OPENAI_API_KEY"])
+            if key:
+                text = _openai_compat(
+                    "https://api.openai.com/v1/chat/completions",
+                    key,
+                    "gpt-4o-mini",
+                    prompt,
+                    system=system,
+                    max_tokens=120,
+                )
+                if text:
+                    return text, "openai:gpt-4o-mini"
+        elif p == "anthropic":
+            text = _anthropic_chat(prompt, system=system)
+            if text:
+                return text, "anthropic"
+        elif p == "google":
+            text = _google_chat(prompt, system=system)
+            if text:
+                return text, "google"
+        elif p == "xai":
+            key = _env_key(["XAI_API_KEY"])
+            if key:
+                text = _openai_compat(
+                    "https://api.x.ai/v1/chat/completions",
+                    key,
+                    "grok-4.6",
+                    prompt,
+                    system=system,
+                    max_tokens=120,
+                )
+                if text:
+                    return text, "xai"
+        elif p == "deepseek":
+            key = _env_key(["DEEPSEEK_API_KEY"])
+            if key:
+                text = _openai_compat(
+                    "https://api.deepseek.com/chat/completions",
+                    key,
+                    "deepseek-chat",
+                    prompt,
+                    system=system,
+                    max_tokens=120,
+                )
+                if text:
+                    return text, "deepseek"
+    return None, "none"
