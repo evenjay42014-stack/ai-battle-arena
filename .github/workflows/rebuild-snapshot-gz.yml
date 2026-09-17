@@ -1,0 +1,25 @@
+name: rebuild-snapshot-gz
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - arena/_chunks/snap_gz_0.txt
+      - arena/_chunks/snap_gz_1.txt
+      - arena/_rebuild_snapshot_gz.py
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 arena/_rebuild_snapshot_gz.py
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add arena/data/snapshot.json
+          git diff --cached --quiet || git commit -m "Rebuild arena/data/snapshot.json"
+          git push
