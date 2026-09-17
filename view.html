@@ -71,7 +71,7 @@
     }
     async function load() {
       try {
-        const data = await jget('/arena/data/snapshot.json');
+        const data = await jget('arena/data/snapshot.json');
         const tb = document.getElementById('standings');
         tb.innerHTML = (data.standings || []).map(r => `
           <tr>
@@ -107,12 +107,12 @@
       if (!el) return;
       try {
         let rows = [];
-        let res = await fetch('/arena/data/reviews_index.json', { cache: 'no-store' });
+        let res = await fetch('arena/data/reviews_index.json', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           rows = data.reviews || [];
         } else {
-          res = await fetch('/arena/data/review_feed.jsonl', { cache: 'no-store' });
+          res = await fetch('arena/data/review_feed.jsonl', { cache: 'no-store' });
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const text = await res.text();
           rows = text.trim().split('\n').filter(Boolean).map(l => {
