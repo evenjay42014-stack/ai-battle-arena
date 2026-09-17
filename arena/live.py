@@ -10,6 +10,18 @@ from typing import Callable
 
 Timeout = 20
 
+# Keep probe lists aligned with arena/agents.py _DIRECT_MODELS / OpenRouter fallbacks.
+XAI_MODELS = ("grok-4.6", "grok-4.5", "grok-4.3")
+OPENAI_MODELS = ("gpt-4o-mini", "gpt-4.1-mini")
+ANTHROPIC_MODELS = (
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-5-20250929",
+    "claude-3-haiku-20240307",
+)
+GOOGLE_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+DEEPSEEK_MODELS = ("deepseek-chat", "deepseek-flash")
+OPENROUTER_MODELS = ("openrouter/auto", "openai/gpt-4o-mini")
+
 
 def _redact(detail: str) -> str:
     """Strip accidental key-looking substrings from error text."""
@@ -67,8 +79,7 @@ def check_openrouter() -> tuple[bool, str]:
     key = _key("OPENROUTER_API_KEY")
     if not key:
         return False, "OPENROUTER_API_KEY not set"
-    # Prefer openrouter/auto; fall back to a cheap OpenAI-routed model.
-    for model in ("openrouter/auto", "openai/gpt-4o-mini"):
+    for model in OPENROUTER_MODELS:
         status, payload = _http_json(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -85,7 +96,6 @@ def check_openrouter() -> tuple[bool, str]:
         if status == 200 and isinstance(payload, dict) and payload.get("choices"):
             return True, f"ok model={model}"
         detail = payload if isinstance(payload, str) else json.dumps(payload)[:240]
-        # Try next model on 404/model errors
         if status in (400, 404) and "model" in str(detail).lower():
             continue
         return False, _redact(f"HTTP {status}: {detail}")
@@ -96,19 +106,26 @@ def check_openai() -> tuple[bool, str]:
     key = _key("OPENAI_API_KEY")
     if not key:
         return False, "OPENAI_API_KEY not set"
-    status, payload = _http_json(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {key}"},
-        body={
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": "Reply with OK"}],
-            "max_tokens": 8,
-        },
-    )
-    if status == 200 and isinstance(payload, dict) and payload.get("choices"):
-        return True, "ok model=gpt-4o-mini"
-    detail = payload if isinstance(payload, str) else json.dumps(payload)[:240]
-    return False, _redact(f"HTTP {status}: {detail}")
+    last_status, last_payload = -1, ""
+    for model in OPENAI_MODELS:
+        status, payload = _http_json(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            body={
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with OK"}],
+                "max_tokens": 8,
+            },
+        )
+        last_status, last_payload = status, payload
+        if status == 200 and isinstance(payload, dict) and payload.get("choices"):
+            return True, f"ok model={model}"
+        detail = payload if isinstance(payload, str) else json.dumps(payload)
+        if status in (400, 404) and "model" in str(detail).lower():
+            continue
+        break
+    detail = last_payload if isinstance(last_payload, str) else json.dumps(last_payload)[:240]
+    return False, _redact(f"HTTP {last_status}: {detail}")
 
 
 def check_anthropic() -> tuple[bool, str]:
@@ -116,11 +133,7 @@ def check_anthropic() -> tuple[bool, str]:
     if not key:
         return False, "ANTHROPIC_API_KEY not set"
     last_status, last_payload = -1, ""
-    for model in (
-        "claude-haiku-4-5-20251001",
-        "claude-3-haiku-20240307",
-        "claude-sonnet-4-5-20250929",
-    ):
+    for model in ANTHROPIC_MODELS:
         status, payload = _http_json(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -148,7 +161,7 @@ def check_google() -> tuple[bool, str]:
     if not key:
         return False, "GOOGLE_API_KEY / GEMINI_API_KEY not set"
     last_status, last_payload = -1, ""
-    for model in ("gemini-3.6-flash", "gemini-2.5-flash", "gemini-flash-latest"):
+    for model in GOOGLE_MODELS:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={key}"
@@ -168,19 +181,26 @@ def check_deepseek() -> tuple[bool, str]:
     key = _key("DEEPSEEK_API_KEY")
     if not key:
         return False, "DEEPSEEK_API_KEY not set"
-    status, payload = _http_json(
-        "https://api.deepseek.com/chat/completions",
-        headers={"Authorization": f"Bearer {key}"},
-        body={
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": "Reply with OK"}],
-            "max_tokens": 8,
-        },
-    )
-    if status == 200 and isinstance(payload, dict) and payload.get("choices"):
-        return True, "ok model=deepseek-chat"
-    detail = payload if isinstance(payload, str) else json.dumps(payload)[:240]
-    return False, _redact(f"HTTP {status}: {detail}")
+    last_status, last_payload = -1, ""
+    for model in DEEPSEEK_MODELS:
+        status, payload = _http_json(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            body={
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with OK"}],
+                "max_tokens": 8,
+            },
+        )
+        last_status, last_payload = status, payload
+        if status == 200 and isinstance(payload, dict) and payload.get("choices"):
+            return True, f"ok model={model}"
+        detail = payload if isinstance(payload, str) else json.dumps(payload)
+        if status in (400, 404) and "model" in str(detail).lower():
+            continue
+        break
+    detail = last_payload if isinstance(last_payload, str) else json.dumps(last_payload)[:240]
+    return False, _redact(f"HTTP {last_status}: {detail}")
 
 
 def check_xai() -> tuple[bool, str]:
@@ -188,7 +208,7 @@ def check_xai() -> tuple[bool, str]:
     if not key:
         return False, "XAI_API_KEY not set"
     last_status, last_payload = -1, ""
-    for model in ("grok-4.6", "grok-4.5", "grok-4.3"):
+    for model in XAI_MODELS:
         status, payload = _http_json(
             "https://api.x.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
