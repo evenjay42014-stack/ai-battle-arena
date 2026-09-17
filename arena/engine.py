@@ -1,13 +1,39 @@
 """Fight engine: 4-fighter FFA, dual judges, play-by-play, curriculum.
 
-Loaded from arena/_chunks_ffa/engine_*.txt so the source can ship as MCP-friendly chunks.
+Implementation lives in arena._ffa_impl (split modules).
 """
 from __future__ import annotations
 
-from pathlib import Path as _Path
+from arena._ffa_impl import (  # noqa: F401
+    DATA_DIR,
+    HISTORY_PATH,
+    RANK_SCORES_4,
+    append_battle_history,
+    build_learning_schedule,
+    dual_judge,
+    fight_four,
+    fight_once,
+    live_judge,
+    live_judge_n,
+    merge_battle_into_snapshot,
+    round_robin,
+    run_custom_battle,
+    single_fight,
+)
 
-_chunk_dir = _Path(__file__).resolve().parent / "_chunks_ffa"
-_parts = sorted(_chunk_dir.glob("engine_*.txt"))
-if not _parts:
-    raise ImportError("arena/_chunks_ffa/engine_*.txt missing — cannot load engine")
-exec("".join(p.read_text(encoding="utf-8") for p in _parts), globals())
+__all__ = [
+    "DATA_DIR",
+    "HISTORY_PATH",
+    "RANK_SCORES_4",
+    "append_battle_history",
+    "build_learning_schedule",
+    "dual_judge",
+    "fight_four",
+    "fight_once",
+    "live_judge",
+    "live_judge_n",
+    "merge_battle_into_snapshot",
+    "round_robin",
+    "run_custom_battle",
+    "single_fight",
+]
