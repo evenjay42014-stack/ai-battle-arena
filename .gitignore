@@ -5,3 +5,4 @@ __pycache__/
 arena/data/bus.json
 arena/data/reviews/*.json
 arena/data/workstation_history.jsonl
+uploads/

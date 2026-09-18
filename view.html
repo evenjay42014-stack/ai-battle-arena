@@ -54,6 +54,22 @@
     details.legacy { border-top:1px dashed var(--line); margin-top:8px; padding-top:8px; }
     details.legacy summary { cursor:pointer; color:var(--muted); font-size:13px; }
     pre.plan { white-space:pre-wrap; font-size:13px; line-height:1.45; margin:0; background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:12px; max-height:320px; overflow:auto; }
+    .attach-bar { margin-top:12px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .attach-bar label.file-btn {
+      background:#0a1018; color:var(--text); border:1px dashed var(--line); border-radius:10px;
+      padding:8px 14px; font-weight:600; cursor:pointer; font-size:13px;
+    }
+    .attach-bar input[type=file] { display:none; }
+    .file-list { list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+    .file-list li {
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      background:#0a1018; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px;
+    }
+    .file-list li button {
+      background:transparent; border:1px solid var(--line); color:var(--warn); border-radius:6px;
+      padding:2px 8px; cursor:pointer; font-size:12px;
+    }
+    .file-list .fname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   </style>
 </head>
 <body>
@@ -70,6 +86,15 @@
         On static GitHub Pages the form shows how to enable the local API.
       </p>
       <textarea id="brief" placeholder="Optional product brief. Empty → default PulseBoard multi-constraint MVP."></textarea>
+      <div class="attach-bar">
+        <label class="file-btn">
+          Attach files / photos
+          <input id="attachInput" type="file" multiple
+            accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,application/pdf,.pdf,text/plain,.txt,.md,.json,.py,.js,.ts,.html,.css,application/zip,.zip" />
+        </label>
+        <span class="muted">Images + text/code/pdf/zip · total decoded ≤ 8 MB · sent as JSON base64</span>
+      </div>
+      <ul class="file-list" id="fileList"></ul>
       <div class="row">
         <button class="primary" id="runBtn" type="button">Run workstation</button>
         <button class="secondary" id="refineBtn" type="button" disabled>Refine with prior context</button>
@@ -120,10 +145,60 @@
   <script>
     let apiLive = false;
     let lastResult = null;
+    /** @type {{name:string,mime:string,file:File}[]} */
+    let selectedFiles = [];
 
     function esc(s) {
       return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
+
+    function renderFileList() {
+      const ul = document.getElementById('fileList');
+      if (!selectedFiles.length) {
+        ul.innerHTML = '';
+        return;
+      }
+      ul.innerHTML = selectedFiles.map((f, i) => `
+        <li>
+          <span class="fname" title="${esc(f.name)}">${esc(f.name)} <span class="muted">(${esc(f.mime || 'file')} · ${f.file.size} B)</span></span>
+          <button type="button" data-i="${i}" aria-label="Remove ${esc(f.name)}">Remove</button>
+        </li>
+      `).join('');
+      ul.querySelectorAll('button[data-i]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectedFiles.splice(Number(btn.getAttribute('data-i')), 1);
+          renderFileList();
+        });
+      });
+    }
+
+    function fileToAttachment(entry) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read ' + entry.name));
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const comma = result.indexOf(',');
+          const data_b64 = comma >= 0 ? result.slice(comma + 1) : result;
+          resolve({ name: entry.name, mime: entry.mime || entry.file.type || 'application/octet-stream', data_b64 });
+        };
+        reader.readAsDataURL(entry.file);
+      });
+    }
+
+    document.getElementById('attachInput').addEventListener('change', (ev) => {
+      const input = ev.target;
+      const files = Array.from(input.files || []);
+      for (const file of files) {
+        selectedFiles.push({
+          name: file.name,
+          mime: file.type || 'application/octet-stream',
+          file,
+        });
+      }
+      input.value = '';
+      renderFileList();
+    });
 
     async function probeApi() {
       const el = document.getElementById('apiStatus');
@@ -189,20 +264,34 @@
       const runBtn = document.getElementById('runBtn');
       const refineBtn = document.getElementById('refineBtn');
       if (!apiLive) {
-        setNote('', 'Live workstation needs the local server: <code>python3 run_arena.py --serve</code>. Static Pages cannot POST to <code>/api/workstation</code>.');
+        setNote('', 'Live workstation needs the local server: <code>python3 run_arena.py --serve</code>. Static Pages cannot POST to <code>/api/workstation</code>. File picker still works client-side.');
         return;
       }
       runBtn.disabled = true;
       refineBtn.disabled = true;
       setNote('', refine ? 'Refining with prior context…' : 'Running all six roles…');
+      let attachments = [];
+      try {
+        if (selectedFiles.length) {
+          setNote('', 'Encoding attachments…');
+          attachments = await Promise.all(selectedFiles.map(fileToAttachment));
+        }
+      } catch (e) {
+        setNote('err', esc(e.message || String(e)));
+        runBtn.disabled = false;
+        document.getElementById('refineBtn').disabled = !(lastResult && lastResult.refine_context);
+        return;
+      }
       const body = {
         brief: briefEl.value,
         hard: true,
       };
+      if (attachments.length) body.attachments = attachments;
       if (refine && lastResult && lastResult.refine_context) {
         body.refine_context = lastResult.refine_context;
       }
       try {
+        setNote('', refine ? 'Refining with prior context…' : 'Running all six roles…');
         const res = await fetch('/api/workstation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -221,8 +310,11 @@
           return;
         }
         renderResult(data);
+        const nAtt = (data.attachments && data.attachments.attachment_meta)
+          ? data.attachments.attachment_meta.length : (attachments.length || 0);
         setNote('ok', `ok — ${ (data.contributions||[]).length } contributions` +
-          (data.used_default_brief ? ' (default brief)' : ''));
+          (data.used_default_brief ? ' (default brief)' : '') +
+          (nAtt ? ` · ${nAtt} attachment(s)` : ''));
       } catch (e) {
         setNote('err', esc(e.message || String(e)));
       } finally {

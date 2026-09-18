@@ -2,13 +2,245 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import io
 import json
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
 from arena.agents import Fighter, build_roster
 from arena.env_loader import load_dotenv, repo_root
+
+# Total decoded attachment payload cap (sum of raw bytes after base64 decode).
+MAX_ATTACHMENTS_DECODED = 8 * 1024 * 1024
+MAX_TEXT_CHARS_PER_FILE = 40_000
+MAX_ZIP_MEMBER_CHARS = 12_000
+MAX_ZIP_TEXT_MEMBERS = 8
+
+_TEXT_EXTS = {
+    ".txt", ".md", ".markdown", ".json", ".py", ".js", ".ts", ".tsx", ".jsx",
+    ".html", ".htm", ".css", ".csv", ".yml", ".yaml", ".toml", ".xml", ".svg",
+    ".sh", ".rs", ".go", ".java", ".c", ".h", ".cpp", ".rb", ".php",
+}
+_TEXT_MIMES = {
+    "text/plain", "text/markdown", "text/csv", "text/html", "text/css",
+    "text/javascript", "application/javascript", "application/json",
+    "application/xml", "text/xml", "application/x-python", "text/x-python",
+}
+_IMAGE_MIMES = {
+    "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif",
+}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_PDF_MIMES = {"application/pdf"}
+_ZIP_MIMES = {"application/zip", "application/x-zip-compressed"}
+
+# Providers where chat helpers can receive image parts (see arena/agents.py).
+VISION_PROVIDERS = frozenset({"openai", "anthropic", "google", "xai", "openrouter"})
+
+
+class AttachmentError(ValueError):
+    """Client-facing attachment validation / size error (map to HTTP 400)."""
+
+
+def _safe_name(name: str) -> str:
+    base = Path(str(name or "file").replace("\\", "/")).name.strip() or "file"
+    return base[:180]
+
+
+def _ext(name: str) -> str:
+    return Path(name).suffix.lower()
+
+
+def _is_image(name: str, mime: str) -> bool:
+    m = (mime or "").lower().split(";")[0].strip()
+    if m in _IMAGE_MIMES or m == "image/jpg":
+        return True
+    return _ext(name) in _IMAGE_EXTS
+
+
+def _is_pdf(name: str, mime: str) -> bool:
+    m = (mime or "").lower().split(";")[0].strip()
+    return m in _PDF_MIMES or _ext(name) == ".pdf"
+
+
+def _is_zip(name: str, mime: str) -> bool:
+    m = (mime or "").lower().split(";")[0].strip()
+    return m in _ZIP_MIMES or _ext(name) == ".zip"
+
+
+def _is_text_like(name: str, mime: str) -> bool:
+    m = (mime or "").lower().split(";")[0].strip()
+    if m.startswith("text/") or m in _TEXT_MIMES:
+        return True
+    return _ext(name) in _TEXT_EXTS
+
+
+def _decode_text(raw: bytes) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1", errors="replace")
+
+
+def _truncate(text: str, limit: int = MAX_TEXT_CHARS_PER_FILE) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    return text[:limit] + f"\n…[truncated at {limit} chars]", True
+
+
+def _pdf_note(name: str, raw: bytes) -> str:
+    """Best-effort PDF note without heavy deps; try crude stream text extract."""
+    note = f"[attached PDF: {name} ({len(raw)} bytes)"
+    # Crude extract: printable runs from uncompressed streams (often empty for modern PDFs).
+    try:
+        # Look for simple text between parentheses in content streams (very limited).
+        sample = raw[:200_000]
+        chunks: list[str] = []
+        i = 0
+        while i < len(sample) and len(chunks) < 40:
+            if sample[i : i + 1] == b"(":
+                j = i + 1
+                buf = bytearray()
+                while j < len(sample) and sample[j : j + 1] != b")":
+                    if sample[j : j + 1] == b"\\" and j + 1 < len(sample):
+                        buf.append(sample[j + 1])
+                        j += 2
+                        continue
+                    buf.append(sample[j])
+                    j += 1
+                    if len(buf) > 200:
+                        break
+                if 3 <= len(buf) <= 200:
+                    try:
+                        t = buf.decode("latin-1", errors="ignore").strip()
+                    except Exception:
+                        t = ""
+                    if t and t.isprintable():
+                        chunks.append(t)
+                i = j + 1
+            else:
+                i += 1
+        if chunks:
+            joined = " ".join(chunks)[:1500]
+            return note + f"; crude text extract]\n{joined}"
+    except Exception:
+        pass
+    return note + "; binary/PDF text extraction limited without extra deps — use vision/notes]"
+
+
+def _zip_sections(name: str, raw: bytes) -> list[str]:
+    sections: list[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            names = zf.namelist()
+            listing = ", ".join(names[:30])
+            if len(names) > 30:
+                listing += f", …(+{len(names) - 30} more)"
+            sections.append(f"### Attachment: {name} (zip, {len(raw)} bytes)\nMembers: {listing}")
+            taken = 0
+            for info in zf.infolist():
+                if taken >= MAX_ZIP_TEXT_MEMBERS:
+                    break
+                if info.is_dir() or info.file_size > 200_000:
+                    continue
+                inner = info.filename
+                if not _is_text_like(inner, ""):
+                    continue
+                try:
+                    data = zf.read(info)
+                except Exception:
+                    continue
+                text, _ = _truncate(_decode_text(data), MAX_ZIP_MEMBER_CHARS)
+                sections.append(f"### Zip member: {name} → {inner}\n```\n{text}\n```")
+                taken += 1
+    except zipfile.BadZipFile:
+        sections.append(f"### Attachment: {name}\n[invalid zip]")
+    return sections
+
+
+def process_attachments(
+    attachments: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Validate + decode attachments. Returns brief_extra, images, meta.
+
+    images: [{name, mime, data_b64, nbytes}] for vision-capable providers.
+    Raises AttachmentError on invalid input or oversize.
+    """
+    if attachments is None:
+        return {"brief_extra": "", "images": [], "meta": []}
+    if not isinstance(attachments, list):
+        raise AttachmentError("attachments must be a list of {name, mime, data_b64}")
+
+    total = 0
+    sections: list[str] = []
+    images: list[dict[str, Any]] = []
+    meta: list[dict[str, Any]] = []
+
+    for i, item in enumerate(attachments):
+        if not isinstance(item, dict):
+            raise AttachmentError(f"attachments[{i}] must be an object")
+        name = _safe_name(item.get("name") or f"file_{i}")
+        mime = str(item.get("mime") or "application/octet-stream").strip()
+        b64 = item.get("data_b64")
+        if not isinstance(b64, str) or not b64.strip():
+            raise AttachmentError(f"attachments[{i}] ({name}): data_b64 required")
+        # Allow data-URL prefix
+        if "," in b64 and b64.strip().lower().startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        try:
+            raw = base64.b64decode(b64, validate=False)
+        except (binascii.Error, ValueError) as e:
+            raise AttachmentError(f"attachments[{i}] ({name}): invalid base64 ({e})") from e
+        total += len(raw)
+        if total > MAX_ATTACHMENTS_DECODED:
+            raise AttachmentError(
+                f"attachments exceed {MAX_ATTACHMENTS_DECODED // (1024 * 1024)} MB "
+                f"decoded limit (got ~{total} bytes). Remove files or shrink payload."
+            )
+
+        entry = {"name": name, "mime": mime, "nbytes": len(raw)}
+        meta.append(entry)
+
+        if _is_image(name, mime):
+            images.append({
+                "name": name,
+                "mime": "image/jpeg" if mime.lower() in ("image/jpg",) else (
+                    mime.lower().split(";")[0].strip() or "image/png"
+                ),
+                "data_b64": base64.b64encode(raw).decode("ascii"),
+                "nbytes": len(raw),
+            })
+            sections.append(
+                f"### Attachment: {name}\n"
+                f"[attached image: {name} ({mime}, {len(raw)} bytes)]"
+            )
+        elif _is_pdf(name, mime):
+            sections.append(f"### Attachment: {name}\n{_pdf_note(name, raw)}")
+        elif _is_zip(name, mime):
+            sections.extend(_zip_sections(name, raw))
+        elif _is_text_like(name, mime):
+            text, trunc = _truncate(_decode_text(raw))
+            fence = "```"
+            sections.append(
+                f"### Attachment: {name} ({mime}, {len(raw)} bytes"
+                + (", truncated" if trunc else "")
+                + f")\n{fence}\n{text}\n{fence}"
+            )
+        else:
+            sections.append(
+                f"### Attachment: {name}\n"
+                f"[attached binary: {name} ({mime}, {len(raw)} bytes) — not inlined]"
+            )
+
+    brief_extra = ""
+    if sections:
+        brief_extra = (
+            "\n\n## Uploaded attachments\n\n" + "\n\n".join(sections) + "\n"
+        )
+    return {"brief_extra": brief_extra, "images": images, "meta": meta}
 
 ROLES: list[str] = [
     "architect",
@@ -312,6 +544,7 @@ def run_workstation(
     brief: str | None = None,
     *,
     refine_context: dict[str, Any] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
     prefer_live: bool = True,
     hard: bool = True,
     rotation_index: int | None = None,
@@ -321,13 +554,20 @@ def run_workstation(
 
     Empty/None brief → strong default hard app-building brief (not an error).
     DEMO fighters work without API keys.
+
+    attachments: optional [{name, mime, data_b64}] — text inlined into brief;
+    images passed to vision-capable providers when LIVE.
     """
     load_dotenv()
+    processed = process_attachments(attachments)
     text_brief = (brief or "").strip()
     used_default = not text_brief
     if used_default:
         text_brief = default_brief(hard=hard)
+    if processed["brief_extra"]:
+        text_brief = text_brief.rstrip() + processed["brief_extra"]
 
+    images = processed["images"]
     roster = build_roster(prefer_live=prefer_live)
     role_map_fighters = assign_roles(roster, rotation_index=rotation_index)
     role_map = {
@@ -339,11 +579,14 @@ def run_workstation(
     for role, fighter in role_map_fighters.items():
         system = ROLE_DEFS[role]["system"]
         user = _build_user_prompt(role, text_brief, refine_context=refine_context)
+        vision = images if fighter.provider in VISION_PROVIDERS else None
         if fighter.mode == "DEMO":
             out = _demo_enrich(fighter, role, text_brief)
+            if images:
+                out += f"\n[attachments: {len(images)} image(s) noted in brief; DEMO has no vision]"
         else:
             try:
-                out = fighter.answer(user, system=system)
+                out = fighter.answer(user, system=system, images=vision)
             except Exception as e:  # noqa: BLE001
                 out = f"[ERROR] {fighter.id}: {e}"
         contributions.append(
@@ -373,6 +616,13 @@ def run_workstation(
         "role_map": role_map,
     }
 
+    vision_note = {
+        "vision_providers": sorted(VISION_PROVIDERS),
+        "text_stub_only": ["deepseek"],
+        "image_count": len(images),
+        "attachment_meta": processed["meta"],
+    }
+
     result: dict[str, Any] = {
         "ok": True,
         "product": "NEXUS AI Workstation",
@@ -390,6 +640,7 @@ def run_workstation(
         ),
         "live_count": sum(1 for c in contributions if c["mode"] == "LIVE"),
         "demo_count": sum(1 for c in contributions if c["mode"] == "DEMO"),
+        "attachments": vision_note,
     }
 
     if persist:
@@ -406,7 +657,11 @@ __all__ = [
     "ROLES",
     "ROLE_DEFS",
     "DEFAULT_BRIEF",
+    "MAX_ATTACHMENTS_DECODED",
+    "VISION_PROVIDERS",
+    "AttachmentError",
     "assign_roles",
     "default_brief",
+    "process_attachments",
     "run_workstation",
 ]

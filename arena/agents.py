@@ -158,13 +158,15 @@ class Fighter:
         *,
         playbook_context: str | None = None,
         system: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> str:
         """Demo policy: deterministic persona-flavored reply."""
         tip = f"(spike={self.spike}, hole={self.hole})"
         sys_bit = f" sys={system[:60]}…" if system else ""
         pb = " with-playbook" if playbook_context else ""
+        img = f" images={len(images)}" if images else ""
         return (
-            f"{self.id} [{self.mode}]{pb}{sys_bit} {self.style}. "
+            f"{self.id} [{self.mode}]{pb}{sys_bit}{img} {self.style}. "
             f"On: {prompt[:120]}… {tip}"
         )
 
@@ -178,19 +180,22 @@ class LiveFighter(Fighter):
         *,
         playbook_context: str | None = None,
         system: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> str:
         user = _compose_user(prompt, playbook_context)
         errors: list[str] = []
 
         # 1) Native frontier API for this provider (Meta/openrouter skips — no native key).
-        direct = self._chat_direct(user, system=system, errors=errors)
+        direct = self._chat_direct(user, system=system, errors=errors, images=images)
         if direct is not None:
             return direct
 
         # 2) OpenRouter fallback (primary for Meta).
         or_key = _env_key(["OPENROUTER_API_KEY"])
         if or_key:
-            text = self._chat_openrouter(or_key, user, system=system, errors=errors)
+            text = self._chat_openrouter(
+                or_key, user, system=system, errors=errors, images=images
+            )
             if text is not None:
                 return text
         elif self.provider == "openrouter":
@@ -209,6 +214,7 @@ class LiveFighter(Fighter):
         *,
         system: str | None = None,
         errors: list[str] | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> str | None:
         models = _OPENROUTER_MODELS.get(self.provider, ["openrouter/auto"])
         last_err = ""
@@ -219,6 +225,7 @@ class LiveFighter(Fighter):
                 model,
                 prompt,
                 system=system,
+                images=images,
                 extra_headers={
                     "HTTP-Referer": "https://github.com/local/ai-battle-arena",
                     "X-Title": "NEXUS AI Battle Arena",
@@ -240,6 +247,7 @@ class LiveFighter(Fighter):
         *,
         system: str | None = None,
         errors: list[str] | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> str | None:
         p = self.provider
         if p == "openai":
@@ -256,6 +264,7 @@ class LiveFighter(Fighter):
                 system=system,
                 route="openai",
                 errors=errors,
+                images=images,
             )
         if p == "deepseek":
             key = _env_key(["DEEPSEEK_API_KEY"])
@@ -263,6 +272,7 @@ class LiveFighter(Fighter):
                 if errors is not None:
                     errors.append("deepseek:DEEPSEEK_API_KEY not set")
                 return None
+            # DeepSeek chat typically has no vision — omit images (text stub in brief).
             return self._try_openai_compat_models(
                 "https://api.deepseek.com/chat/completions",
                 key,
@@ -271,6 +281,7 @@ class LiveFighter(Fighter):
                 system=system,
                 route="deepseek",
                 errors=errors,
+                images=None,
             )
         if p == "xai":
             key = _env_key(["XAI_API_KEY"])
@@ -286,11 +297,12 @@ class LiveFighter(Fighter):
                 system=system,
                 route="xai",
                 errors=errors,
+                images=images,
             )
         if p == "anthropic":
-            return _anthropic_chat(prompt, system=system, errors=errors)
+            return _anthropic_chat(prompt, system=system, errors=errors, images=images)
         if p == "google":
-            return _google_chat(prompt, system=system, errors=errors)
+            return _google_chat(prompt, system=system, errors=errors, images=images)
         if p == "openrouter":
             # Meta: native path is OpenRouter only (handled by caller after direct).
             return None
@@ -306,10 +318,13 @@ class LiveFighter(Fighter):
         system: str | None,
         route: str,
         errors: list[str] | None,
+        images: list[dict[str, Any]] | None = None,
     ) -> str | None:
         last_err = ""
         for model in models:
-            text, err = _openai_compat(url, key, model, prompt, system=system)
+            text, err = _openai_compat(
+                url, key, model, prompt, system=system, images=images
+            )
             if text is not None:
                 return text
             last_err = err or "unknown"
@@ -321,6 +336,27 @@ class LiveFighter(Fighter):
         return None
 
 
+def _user_content_openai(
+    prompt: str, images: list[dict[str, Any]] | None
+) -> Any:
+    """OpenAI-compatible multimodal user content (string or parts list)."""
+    if not images:
+        return prompt
+    parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for img in images[:6]:
+        mime = (img.get("mime") or "image/png").split(";")[0].strip()
+        b64 = img.get("data_b64") or ""
+        if not b64:
+            continue
+        parts.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            }
+        )
+    return parts
+
+
 def _openai_compat(
     url: str,
     key: str,
@@ -330,14 +366,15 @@ def _openai_compat(
     system: str | None = None,
     extra_headers: dict[str, str] | None = None,
     max_tokens: int = 280,
+    images: list[dict[str, Any]] | None = None,
 ) -> tuple[str | None, str]:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, Any]] = []
     if system:
         messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": _user_content_openai(prompt, images)})
     body = {"model": model, "messages": messages, "max_tokens": max_tokens}
     try:
         req = urllib.request.Request(
@@ -360,11 +397,36 @@ def _openai_compat(
         return None, _redact(f"model={model} {type(e).__name__}: {e}")
 
 
+def _anthropic_user_content(
+    prompt: str, images: list[dict[str, Any]] | None
+) -> Any:
+    if not images:
+        return prompt
+    parts: list[dict[str, Any]] = []
+    for img in images[:6]:
+        mime = (img.get("mime") or "image/png").split(";")[0].strip()
+        b64 = img.get("data_b64") or ""
+        if not b64:
+            continue
+        # Anthropic expects jpeg/png/gif/webp
+        if mime == "image/jpg":
+            mime = "image/jpeg"
+        parts.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": b64},
+            }
+        )
+    parts.append({"type": "text", "text": prompt})
+    return parts
+
+
 def _anthropic_chat(
     prompt: str,
     *,
     system: str | None = None,
     errors: list[str] | None = None,
+    images: list[dict[str, Any]] | None = None,
 ) -> str | None:
     key = _env_key(["ANTHROPIC_API_KEY"])
     if not key:
@@ -376,7 +438,9 @@ def _anthropic_chat(
         body: dict[str, Any] = {
             "model": model,
             "max_tokens": 280,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "user", "content": _anthropic_user_content(prompt, images)}
+            ],
         }
         if system:
             body["system"] = system
@@ -421,6 +485,7 @@ def _google_chat(
     *,
     system: str | None = None,
     errors: list[str] | None = None,
+    images: list[dict[str, Any]] | None = None,
 ) -> str | None:
     key = _env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY"])
     if not key:
@@ -433,7 +498,17 @@ def _google_chat(
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={key}"
         )
-        body: dict[str, Any] = {"contents": [{"parts": [{"text": prompt}]}]}
+        parts: list[dict[str, Any]] = [{"text": prompt}]
+        if images:
+            for img in images[:6]:
+                mime = (img.get("mime") or "image/png").split(";")[0].strip()
+                b64 = img.get("data_b64") or ""
+                if not b64:
+                    continue
+                if mime == "image/jpg":
+                    mime = "image/jpeg"
+                parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+        body: dict[str, Any] = {"contents": [{"parts": parts}]}
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
         try:
