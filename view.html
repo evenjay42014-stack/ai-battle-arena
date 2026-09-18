@@ -69,11 +69,11 @@
     <section class="card wide">
       <h2 style="margin:0 0 8px; font-size:16px;">Command center — custom challenge</h2>
       <p class="muted" style="margin-bottom:10px;">
-        Type a multi-constraint challenge. Live fights need
+        Prompt is optional — leave it blank to run the hardest protocol challenge. Live fights need
         <code>python3 run_arena.py --serve</code> (POST <code>/api/battle</code>).
         On static GitHub Pages the prompt bar is read-only and play-by-play still loads from <code>snapshot.json</code>.
       </p>
-      <textarea id="prompt" placeholder="e.g. Design a 4-step checkout that survives 429s, never invents charge_id, and ends with ABORT_CONDITION=… Hard constraints only."></textarea>
+      <textarea id="prompt" placeholder="Optional. Leave blank for the hardest auto protocol — or type your own multi-constraint challenge."></textarea>
       <div class="row">
         <select id="protocol" class="proto" title="Protocol">
           <option value="">auto protocol</option>
@@ -284,16 +284,12 @@
         note.innerHTML = 'Live fights need the local server: <code>python3 run_arena.py --serve</code>. Static Pages cannot POST to <code>/api/battle</code>.';
         return;
       }
-      if (!prompt) {
-        note.style.display = 'block';
-        note.className = 'note err';
-        note.textContent = 'Enter a challenge prompt first.';
-        return;
-      }
       btn.disabled = true;
       note.style.display = 'block';
       note.className = 'note';
-      note.textContent = 'Running 4-fighter FFA with dual judges…';
+      note.textContent = prompt
+        ? 'Running 4-fighter FFA with dual judges…'
+        : 'No prompt — running hardest protocol FFA with rotated fighters…';
       try {
         const body = { prompt, hard: true };
         const proto = document.getElementById('protocol').value;

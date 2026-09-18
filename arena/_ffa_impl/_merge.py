@@ -64,15 +64,75 @@ def merge_battle_into_snapshot(
     return snapshot
 
 
+def _recent_fighter_counts(battles: list[dict[str, Any]], window: int = 24) -> dict[str, int]:
+    """How often each fighter appeared in the recent battle window."""
+    counts: dict[str, int] = {}
+    for b in (battles or [])[-window:]:
+        ids = b.get("fighters")
+        if not ids:
+            ids = [b.get("a"), b.get("b"), b.get("c"), b.get("d")]
+        for fid in ids:
+            if not fid:
+                continue
+            counts[str(fid)] = counts.get(str(fid), 0) + 1
+    return counts
+
+
+def _pick_rotated_fighters(roster: list[Fighter], prev: dict[str, Any], n: int = 4) -> list[Fighter]:
+    """Pick n fighters with fair rotation so the same subset is not reused every fight.
+
+    With a 6-fighter roster and n=4, two fighters sit out each battle. The sit-out
+    window advances each battle so every fighter sits out equally over time.
+    Within the active set we still prefer provider diversity when breaking ties.
+    """
+    if len(roster) <= n:
+        return list(roster)
+
+    battles = list(prev.get("battles") or [])
+    ordered_ids = sorted(f.id for f in roster)
+    by_id = {f.id: f for f in roster}
+    sit = len(roster) - n
+    # Advance sit-out window by `sit` each battle for even coverage
+    start = (len(battles) * sit) % len(roster)
+    sit_ids = {ordered_ids[(start + i) % len(roster)] for i in range(sit)}
+    active = [by_id[i] for i in ordered_ids if i not in sit_ids]
+
+    # Soft provider diversity within the rotated active set (stable order)
+    recent = _recent_fighter_counts(battles)
+    active.sort(key=lambda f: (recent.get(f.id, 0), f.wins + f.losses, -f.elo, f.id))
+    chosen: list[Fighter] = []
+    used_providers: set[str] = set()
+    for f in active:
+        if f.provider in used_providers:
+            continue
+        chosen.append(f)
+        used_providers.add(f.provider)
+    for f in active:
+        if f in chosen:
+            continue
+        chosen.append(f)
+        if len(chosen) >= n:
+            break
+    return chosen[:n]
+
+
+def _hardest_protocol(protocol_id: str | None, battle_count: int) -> Protocol:
+    """Resolve protocol for empty-prompt fights: explicit id, else rotate hardest suite."""
+    if protocol_id and protocol_id in PROTOCOL_BY_ID:
+        return PROTOCOL_BY_ID[protocol_id]
+    # Rotate through all protocols so empty-prompt fights stay adversarial and varied
+    return protocol_at(battle_count)
+
+
 def run_custom_battle(
-    prompt: str,
+    prompt: str | None = None,
     *,
     protocol_id: str | None = None,
     fighter_ids: list[str] | None = None,
     hard: bool = True,
     prefer_live: bool = True,
 ) -> dict[str, Any]:
-    """Run one 4-fighter FFA with a custom user prompt; persist snapshot + history."""
+    """Run one 4-fighter FFA. Empty prompt → hardest protocol generator; rotates fighters."""
     bus = ContextBus()
     playbook = Playbook.load_or_new()
     roster = build_roster(prefer_live=prefer_live)
@@ -89,25 +149,24 @@ def run_custom_battle(
 
     if fighter_ids:
         chosen = [by_id[i] for i in fighter_ids if i in by_id]
-    else:
-        # Prefer diverse providers; take top-4 by least fights then elo
-        chosen = sorted(roster, key=lambda f: (f.wins + f.losses, -f.elo))[:4]
         if len(chosen) < 4:
-            chosen = roster[:4]
+            for f in _pick_rotated_fighters(roster, prev, n=4):
+                if f not in chosen:
+                    chosen.append(f)
+                if len(chosen) == 4:
+                    break
+    else:
+        chosen = _pick_rotated_fighters(roster, prev, n=4)
 
-    if len(chosen) < 4:
-        # pad from roster
-        for f in roster:
-            if f not in chosen:
-                chosen.append(f)
-            if len(chosen) == 4:
-                break
     if len(chosen) != 4:
         raise ValueError("need 4 fighters in roster")
 
-    proto = PROTOCOL_BY_ID.get(protocol_id) if protocol_id else protocol_at(int(time.time()) % 10)
-    if proto is None:
-        proto = protocol_at(0)
+    battles = list(prev.get("battles") or [])
+    proto = _hardest_protocol(protocol_id, len(battles))
+    user_prompt = (prompt or "").strip()
+    # Empty bar → protocol's hardest generated challenge (no soft custom text)
+    custom = user_prompt if user_prompt else None
+    hard = True if not user_prompt else bool(hard)
 
     result = fight_four(
         chosen,
@@ -115,11 +174,11 @@ def run_custom_battle(
         protocol=proto,
         playbook=playbook,
         hard=hard,
-        custom_prompt=prompt,
+        custom_prompt=custom,
     )
     playbook.save()
     snapshot = merge_battle_into_snapshot(result, roster, playbook, bus=bus)
     bus.dump(DATA_DIR / "bus.json")
     return {"battle": result, "snapshot": snapshot}
 
-__all__ = ['merge_battle_into_snapshot', 'run_custom_battle']
+__all__ = ['merge_battle_into_snapshot', 'run_custom_battle', '_pick_rotated_fighters', '_hardest_protocol', '_recent_fighter_counts']
