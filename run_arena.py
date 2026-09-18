@@ -223,7 +223,7 @@ def cmd_serve(port: int) -> int:
             if path == "/api/battle":
                 return self._send_json(
                     405,
-                    {"error": "Use POST /api/battle with JSON {prompt, protocol_id?}"},
+                    {"error": "Use POST /api/battle with JSON {prompt?, protocol_id?} — empty prompt uses hardest protocol"},
                 )
             return super().do_GET()
 
@@ -237,9 +237,8 @@ def cmd_serve(port: int) -> int:
             except ValueError as e:
                 return self._send_json(400, {"error": str(e)})
 
+            # Prompt is optional: empty → hardest protocol generator on the server
             prompt = (body.get("prompt") or "").strip()
-            if not prompt:
-                return self._send_json(400, {"error": "prompt is required"})
             protocol_id = body.get("protocol_id") or None
             fighter_ids = body.get("fighter_ids") or None
             hard = body.get("hard", True)
@@ -248,7 +247,7 @@ def cmd_serve(port: int) -> int:
                 from arena.engine import run_custom_battle
 
                 out = run_custom_battle(
-                    prompt,
+                    prompt or None,
                     protocol_id=protocol_id,
                     fighter_ids=fighter_ids,
                     hard=bool(hard),
