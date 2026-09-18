@@ -1,9 +1,8 @@
-"""NEXUS — AI Battle Arena engine.
+"""NEXUS — AI Workstation (+ legacy battle arena engine).
 
-Models do not update weights here. They update a shared playbook:
-lesson cards mined from losses, injected into the next fight,
-audited on replay. Every AI is on one event bus.
+Primary product: multi-provider collaborative app-building via arena.workstation.
+Legacy FFA / playbook learning remains available but is not the main UI flow.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __arena__ = "NEXUS"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEXUS AI Battle Arena CLI — 4-fighter FFA, dual judges, command center API."""
+"""NEXUS AI Workstation CLI — collaborative multi-provider command center (+ legacy FFA)."""
 
 from __future__ import annotations
 
@@ -220,6 +220,11 @@ def cmd_serve(port: int) -> int:
                         except json.JSONDecodeError:
                             pass
                 return self._send_json(200, {"battles": rows[-50:], "count": len(rows)})
+            if path == "/api/workstation":
+                return self._send_json(
+                    405,
+                    {"error": "Use POST /api/workstation with JSON {brief?, refine_context?, hard?}"},
+                )
             if path == "/api/battle":
                 return self._send_json(
                     405,
@@ -229,7 +234,34 @@ def cmd_serve(port: int) -> int:
 
         def do_POST(self):
             parsed = urlparse(self.path)
-            if parsed.path != "/api/battle":
+            path = parsed.path
+
+            if path == "/api/workstation":
+                try:
+                    body = self._read_json_body()
+                except ValueError as e:
+                    return self._send_json(400, {"error": str(e)})
+                brief = body.get("brief")
+                if brief is not None and not isinstance(brief, str):
+                    return self._send_json(400, {"error": "brief must be a string"})
+                refine_context = body.get("refine_context")
+                if refine_context is not None and not isinstance(refine_context, dict):
+                    return self._send_json(400, {"error": "refine_context must be an object"})
+                hard = body.get("hard", True)
+                try:
+                    from arena.workstation import run_workstation
+
+                    out = run_workstation(
+                        brief,
+                        refine_context=refine_context,
+                        hard=bool(hard),
+                        prefer_live=True,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    return self._send_json(500, {"error": str(e)})
+                return self._send_json(200, out)
+
+            if path != "/api/battle":
                 self.send_error(404, "Not Found")
                 return
             try:
@@ -271,8 +303,9 @@ def cmd_serve(port: int) -> int:
 
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("127.0.0.1", port), Handler) as httpd:
-        print(f"NEXUS command center http://127.0.0.1:{port}/view.html")
-        print("  API: POST /api/battle  GET /api/snapshot  GET /api/history")
+        print(f"NEXUS AI Workstation http://127.0.0.1:{port}/view.html")
+        print("  API: POST /api/workstation  POST /api/battle (legacy)")
+        print("       GET /api/snapshot  GET /api/history")
         print("  .env and directory listing are blocked")
         try:
             httpd.serve_forever()
@@ -284,10 +317,10 @@ def cmd_serve(port: int) -> int:
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     p = argparse.ArgumentParser(
-        description="NEXUS — AI Battle Arena (4-fighter FFA, dual judges)"
+        description="NEXUS — AI Workstation (collaborate) + legacy FFA arena"
     )
     p.add_argument("--live-check", action="store_true", help="Probe providers")
-    p.add_argument("--serve", action="store_true", help="Command center + battle API")
+    p.add_argument("--serve", action="store_true", help="Workstation UI + /api/workstation (+ legacy /api/battle)")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--review", metavar="TARGET", help="Council review: path, URL, or brief text/file")
     p.add_argument("--reviews", action="store_true", help="List recent project reviews")

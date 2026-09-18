@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NEXUS — AI Battle Arena</title>
+  <title>NEXUS AI Workstation</title>
   <style>
-    :root { color-scheme: dark; --bg:#0b0f14; --card:#121821; --line:#243041; --text:#e8eef7; --muted:#9aacc0; --live:#3ddc97; --demo:#f0a500; --accent:#6ea8fe; --warn:#ff7a7a; }
+    :root { color-scheme: dark; --bg:#0b0f14; --card:#121821; --line:#243041; --text:#e8eef7; --muted:#9aacc0; --live:#3ddc97; --demo:#f0a500; --accent:#6ea8fe; --warn:#ff7a7a; --role:#a78bfa; }
     * { box-sizing: border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:radial-gradient(1200px 600px at 10% -10%, #1a2740, var(--bg)); color:var(--text); min-height:100vh; }
     header { padding:28px 24px 8px; max-width:1100px; margin:0 auto; }
@@ -15,320 +15,225 @@
     .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
     .wide { grid-column: 1 / -1; }
     @media (max-width:800px) { main { grid-template-columns: 1fr; } }
-    table { width:100%; border-collapse:collapse; }
-    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); font-size:14px; }
-    th { color:var(--muted); font-weight:600; }
     .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
     .LIVE { background:rgba(61,220,151,.15); color:var(--live); }
     .DEMO { background:rgba(240,165,0,.15); color:var(--demo); }
-    .approve { background:rgba(61,220,151,.15); color:var(--live); }
-    .revise { background:rgba(240,165,0,.15); color:var(--demo); }
-    .reject { background:rgba(255,90,90,.15); color:#ff7a7a; }
+    .role { background:rgba(167,139,250,.15); color:var(--role); text-transform:capitalize; }
     .muted { color:var(--muted); font-size:13px; }
     code { background:#0a1018; padding:2px 6px; border-radius:6px; }
-    .feed-item { padding:10px 0; border-bottom:1px solid var(--line); font-size:13px; }
-    .metrics { display:flex; flex-wrap:wrap; gap:10px; }
-    .metric { background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-width:120px; }
-    .metric b { display:block; font-size:18px; color:var(--accent); }
     textarea {
-      width:100%; min-height:88px; resize:vertical; background:#0a1018; color:var(--text);
+      width:100%; min-height:110px; resize:vertical; background:#0a1018; color:var(--text);
       border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit;
     }
     textarea:focus { outline:2px solid rgba(110,168,254,.35); border-color:var(--accent); }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
-    button.fight {
+    button.primary {
       background:linear-gradient(180deg, #3d6df0, #2a4fbf); color:#fff; border:0; border-radius:10px;
       padding:10px 18px; font-weight:700; cursor:pointer; font-size:14px;
     }
-    button.fight:disabled { opacity:.5; cursor:wait; }
+    button.secondary {
+      background:#0a1018; color:var(--text); border:1px solid var(--line); border-radius:10px;
+      padding:10px 16px; font-weight:600; cursor:pointer; font-size:14px;
+    }
+    button.primary:disabled, button.secondary:disabled { opacity:.5; cursor:wait; }
     .note {
       margin-top:10px; padding:10px 12px; border-radius:10px; background:rgba(240,165,0,.08);
       border:1px solid rgba(240,165,0,.35); color:var(--demo); font-size:13px;
     }
     .note.ok { background:rgba(61,220,151,.08); border-color:rgba(61,220,151,.35); color:var(--live); }
     .note.err { background:rgba(255,90,90,.08); border-color:rgba(255,90,90,.35); color:var(--warn); }
-    details.battle { border-bottom:1px solid var(--line); padding:8px 0; }
-    details.battle summary { cursor:pointer; list-style:none; display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
-    details.battle summary::-webkit-details-marker { display:none; }
-    .pbp { margin-top:10px; background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:10px 12px; max-height:360px; overflow:auto; }
-    .pbp-beat { display:grid; grid-template-columns: 52px 1fr; gap:8px; padding:8px 0; border-bottom:1px solid #1a2330; font-size:12.5px; }
-    .pbp-beat:last-child { border-bottom:0; }
-    .pbp-t { color:var(--accent); font-weight:700; font-variant-numeric: tabular-nums; }
-    .pbp-tag { display:inline-block; min-width:72px; font-weight:700; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:.04em; }
-    select.proto {
-      background:#0a1018; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+    .contrib-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+    .contrib {
+      background:#0a1018; border:1px solid var(--line); border-radius:12px; padding:12px 14px;
+      display:flex; flex-direction:column; gap:8px; min-height:140px;
     }
+    .contrib h3 { margin:0; font-size:14px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .contrib .body { font-size:13px; line-height:1.45; white-space:pre-wrap; color:#d5deea; flex:1; max-height:280px; overflow:auto; }
+    .panel-list { margin:0; padding-left:18px; font-size:13px; line-height:1.5; }
+    .panel-list li { margin-bottom:6px; }
+    details.legacy { border-top:1px dashed var(--line); margin-top:8px; padding-top:8px; }
+    details.legacy summary { cursor:pointer; color:var(--muted); font-size:13px; }
+    pre.plan { white-space:pre-wrap; font-size:13px; line-height:1.45; margin:0; background:#0a1018; border:1px solid var(--line); border-radius:10px; padding:12px; max-height:320px; overflow:auto; }
   </style>
 </head>
 <body>
   <header>
-    <h1>NEXUS — AI Battle Arena</h1>
-    <p>4-fighter free-for-alls · dual judges · play-by-play · playbook learning</p>
+    <h1>NEXUS AI Workstation</h1>
+    <p>All six live providers collaborate on one brief — architect · implementer · critic · tester · ux · integrator</p>
   </header>
   <main>
     <section class="card wide">
-      <h2 style="margin:0 0 8px; font-size:16px;">Command center — custom challenge</h2>
+      <h2 style="margin:0 0 8px; font-size:16px;">Brief → collaborative build</h2>
       <p class="muted" style="margin-bottom:10px;">
-        Prompt is optional — leave it blank to run the hardest protocol challenge. Live fights need
-        <code>python3 run_arena.py --serve</code> (POST <code>/api/battle</code>).
-        On static GitHub Pages the prompt bar is read-only and play-by-play still loads from <code>snapshot.json</code>.
+        Optional brief — leave blank for a strong default hard app-building task.
+        Live runs need <code>python3 run_arena.py --serve</code> (POST <code>/api/workstation</code>).
+        On static GitHub Pages the form shows how to enable the local API.
       </p>
-      <textarea id="prompt" placeholder="Optional. Leave blank for the hardest auto protocol — or type your own multi-constraint challenge."></textarea>
+      <textarea id="brief" placeholder="Optional product brief. Empty → default PulseBoard multi-constraint MVP."></textarea>
       <div class="row">
-        <select id="protocol" class="proto" title="Protocol">
-          <option value="">auto protocol</option>
-          <option value="logic_gauntlet">Logic Gauntlet</option>
-          <option value="code_coliseum">Code Coliseum</option>
-          <option value="knowledge_crossfire">Knowledge Crossfire</option>
-          <option value="debate_pit">Debate Pit</option>
-          <option value="constraint_forge">Constraint Forge</option>
-          <option value="instruction_siege">Instruction Siege</option>
-          <option value="planning_raid">Planning Raid</option>
-          <option value="robustness_pit">Robustness Pit</option>
-          <option value="pressure_cooker">Pressure Cooker</option>
-          <option value="alignment_trial">Alignment Trial</option>
-        </select>
-        <button class="fight" id="fightBtn" type="button">Fight (4-way FFA)</button>
+        <button class="primary" id="runBtn" type="button">Run workstation</button>
+        <button class="secondary" id="refineBtn" type="button" disabled>Refine with prior context</button>
         <span class="muted" id="apiStatus">checking API…</span>
       </div>
-      <div id="fightNote" class="note" style="display:none;"></div>
+      <div id="runNote" class="note" style="display:none;"></div>
+    </section>
+
+    <section class="card wide" id="metaCard" style="display:none;">
+      <h2 style="margin:0 0 8px; font-size:16px;">Run meta</h2>
+      <p class="muted" id="metaLine"></p>
+    </section>
+
+    <section class="card">
+      <h2 style="margin:0 0 10px; font-size:16px;">Shared plan</h2>
+      <pre class="plan" id="planPanel"><span class="muted">Run the workstation to synthesize a plan.</span></pre>
+    </section>
+
+    <section class="card">
+      <h2 style="margin:0 0 10px; font-size:16px;">Disagreements &amp; next actions</h2>
+      <h3 style="margin:0 0 6px; font-size:13px; color:var(--muted);">Disagreements</h3>
+      <ul class="panel-list" id="disagreePanel"><li class="muted">—</li></ul>
+      <h3 style="margin:14px 0 6px; font-size:13px; color:var(--muted);">Next actions</h3>
+      <ul class="panel-list" id="actionsPanel"><li class="muted">—</li></ul>
     </section>
 
     <section class="card wide">
-      <h2 style="margin:0 0 12px; font-size:16px;">Learning metrics</h2>
-      <div class="metrics" id="metrics"><span class="muted">Loading…</span></div>
+      <h2 style="margin:0 0 12px; font-size:16px;">Role contributions</h2>
+      <div class="contrib-grid" id="contribs">
+        <div class="muted">No run yet.</div>
+      </div>
     </section>
-    <section class="card">
-      <h2 style="margin:0 0 12px; font-size:16px;">Standings</h2>
-      <table>
-        <thead><tr><th>Elo</th><th>Δ</th><th>W-L</th><th>Mode</th><th>Fighter</th><th>Hole</th></tr></thead>
-        <tbody id="standings"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-      </table>
-      <p id="meta" class="muted" style="margin-top:12px;"></p>
-    </section>
-    <section class="card">
-      <h2 style="margin:0 0 12px; font-size:16px;">Play-by-play</h2>
-      <p class="muted" style="margin:0 0 8px;">Expand a recent FFA for the full timeline (prompt → answers → judges → ranking → lessons).</p>
-      <div id="pbpPanel" class="muted">Loading…</div>
-    </section>
+
     <section class="card wide">
-      <h2 style="margin:0 0 12px; font-size:16px;">Recent battles</h2>
-      <div id="battles" class="muted">Loading…</div>
-    </section>
-    <section class="card wide">
-      <h2 style="margin:0 0 12px; font-size:16px;">Project reviews</h2>
-      <p class="muted" style="margin:0 0 10px;">
-        Polls <code>arena/data/reviews_index.json</code> (fallback <code>review_feed.jsonl</code>).
-        Submit: <code>python3 run_arena.py --review TARGET</code>
-      </p>
-      <div id="reviews" class="muted">Loading…</div>
+      <details class="legacy">
+        <summary>Legacy Arena (FFA battle engine — optional)</summary>
+        <p class="muted" style="margin:10px 0;">
+          The 4-fighter FFA / dual-judge engine remains available via
+          <code>POST /api/battle</code> and CLI <code>--tournament</code> / <code>--quick</code>.
+          Main product flow is the workstation above — models collaborate, they do not fight.
+        </p>
+        <p class="muted">
+          Snapshot standings (if any): load from <code>arena/data/snapshot.json</code> after a legacy run.
+        </p>
+      </details>
     </section>
   </main>
   <script>
     let apiLive = false;
-
-    async function jget(url) {
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) throw new Error(url + ' ' + res.status);
-      return res.json();
-    }
+    let lastResult = null;
 
     function esc(s) {
       return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    function renderPbp(beats) {
-      if (!beats || !beats.length) return '<div class="muted">No play-by-play stored for this battle.</div>';
-      return `<div class="pbp">${beats.map(b => {
-        const ev = b.event || '';
-        let body = '';
-        if (ev === 'prompt') body = `<span class="pbp-tag">Prompt</span> ${esc((b.text||'').slice(0,500))}`;
-        else if (ev === 'answer') body = `<span class="pbp-tag">Answer</span> <strong>${esc(b.fighter)}</strong> <span class="badge ${esc(b.mode||'DEMO')}">${esc(b.mode||'')}</span><div class="muted" style="margin-top:4px;white-space:pre-wrap;">${esc((b.text||'').slice(0,420))}</div>`;
-        else if (ev === 'judge') body = `<span class="pbp-tag">Judge ${esc(b.judge)}</span> ranking: <strong>${esc((b.ranking||[]).join(' › '))}</strong> · ${b.live ? 'LIVE' : 'heur'} <span class="muted">${esc(b.note||'')}</span>`;
-        else if (ev === 'disagreement') body = `<span class="pbp-tag">Split</span> <span style="color:var(--warn)">${esc(b.detail||'judges disagree')}</span>`;
-        else if (ev === 'ranking') body = `<span class="pbp-tag">Final</span> winner <strong>${esc(b.winner)}</strong> · ${esc((b.order||[]).join(' › '))}`;
-        else if (ev === 'lessons') body = `<span class="pbp-tag">Lessons</span> ${esc(b.count)} cards` +
-          ((b.items||[]).map(i => `<div class="muted">· ${esc(i.fighter_id)} [${esc(i.role)}] ${esc(i.rule)}</div>`).join(''));
-        else body = `<span class="pbp-tag">${esc(ev)}</span> ${esc(JSON.stringify(b).slice(0,200))}`;
-        return `<div class="pbp-beat"><div class="pbp-t">${String(b.t ?? '').padStart(2,'0')}</div><div>${body}</div></div>`;
-      }).join('')}</div>`;
-    }
-
-    function battleTitle(x) {
-      const names = x.fighters || [x.a, x.b, x.c, x.d].filter(Boolean);
-      const fmt = x.format === 'ffa4' || (names && names.length >= 4) ? 'FFA4' : '1v1';
-      return `${esc(x.protocol_name || x.protocol || '')} · ${fmt} · ${esc((names||[]).join(' / '))} → <strong>${esc(x.winner)}</strong>`;
-    }
-
     async function probeApi() {
-      const status = document.getElementById('apiStatus');
-      const note = document.getElementById('fightNote');
-      const btn = document.getElementById('fightBtn');
+      const el = document.getElementById('apiStatus');
       try {
         const res = await fetch('/api/snapshot', { cache: 'no-store' });
         const ct = (res.headers.get('content-type') || '').toLowerCase();
         // GitHub Pages returns HTML 404 for /api/* — never treat that as live API
-        if (!res.ok || !ct.includes('application/json')) throw new Error('no api');
-        await res.json();
+        if (ct.includes('text/html')) {
+          apiLive = false;
+          el.textContent = 'static Pages — use --serve for live API';
+          return;
+        }
         apiLive = true;
-        status.textContent = 'API online — live fights enabled';
-        status.style.color = 'var(--live)';
-        btn.disabled = false;
-        note.style.display = 'none';
-      } catch {
+        el.textContent = 'API live (workstation + legacy)';
+      } catch (e) {
         apiLive = false;
-        status.textContent = 'static mode (no API)';
-        status.style.color = 'var(--demo)';
-        note.style.display = 'block';
-        note.className = 'note';
-        note.innerHTML = 'Static GitHub Pages cannot run fights. Start the command center with <code>python3 run_arena.py --serve</code> then open <code>http://127.0.0.1:8765/view.html</code>. Play-by-play below still renders from <code>arena/data/snapshot.json</code>.';
-        btn.disabled = false; // still clickable to show the note
+        el.textContent = 'API unreachable — run --serve';
       }
     }
 
-    async function load() {
-      try {
-        let data;
-        try {
-          data = await jget('/api/snapshot');
-        } catch {
-          data = await jget('arena/data/snapshot.json');
-        }
-        const tb = document.getElementById('standings');
-        tb.innerHTML = (data.standings || []).map(r => `
-          <tr>
-            <td>${Number(r.elo).toFixed(1)}</td>
-            <td>${r.elo_delta != null ? (r.elo_delta >= 0 ? '+' : '') + r.elo_delta : '—'}</td>
-            <td>${r.wins}-${r.losses}</td>
-            <td><span class="badge ${r.mode}">${r.mode}</span></td>
-            <td>${esc(r.id)}</td>
-            <td class="muted">${esc(r.hole || '')}</td>
-          </tr>`).join('') || '<tr><td colspan="6" class="muted">No standings yet</td></tr>';
-        document.getElementById('meta').textContent =
-          `Snapshot ${data.ts || ''} · ${(data.battles||[]).length} battles · format ${data.format || 'legacy'} · protocols ${(data.protocols_used||[]).length}`;
+    function renderResult(data) {
+      lastResult = data;
+      document.getElementById('refineBtn').disabled = !data || !data.refine_context;
+      document.getElementById('metaCard').style.display = 'block';
+      const live = data.live_count ?? 0;
+      const demo = data.demo_count ?? 0;
+      const def = data.used_default_brief ? ' · default brief' : '';
+      document.getElementById('metaLine').textContent =
+        `${data.ts || ''} · ${live} LIVE / ${demo} DEMO · rotation ${data.rotation_index ?? '?'}${def}`;
 
-        const battles = (data.battles || []).slice(-12).reverse();
-        document.getElementById('battles').innerHTML = battles.map(x => {
-          const dj = (x.disagreement && x.disagreement.winner_mismatch) ? ' · <span style="color:var(--warn)">judge split</span>' : '';
-          const jl = x.judge_live ? 'dual-judge:LIVE' : 'dual-judge:heur';
-          return `<div class="feed-item">${battleTitle(x)}
-            <span class="muted"> lessons=${(x.lessons||[]).length} ${jl}${dj}</span></div>`;
-        }).join('') || 'No battles yet';
+      document.getElementById('planPanel').textContent = data.plan || '—';
 
-        document.getElementById('pbpPanel').innerHTML = battles.map((x, i) => `
-          <details class="battle" ${i===0?'open':''}>
-            <summary>${battleTitle(x)}
-              <span class="muted">hard=${esc(String(!!x.hard))} · ${(x.play_by_play||[]).length} beats</span>
-            </summary>
-            ${renderPbp(x.play_by_play)}
-          </details>`).join('') || 'No play-by-play yet — run a fight via the prompt bar or <code>python3 run_arena.py --quick</code>';
+      const d = data.disagreements || [];
+      document.getElementById('disagreePanel').innerHTML =
+        d.map(x => `<li>${esc(x)}</li>`).join('') || '<li class="muted">—</li>';
 
-        const m = document.getElementById('metrics');
-        const sig = data.improvement_signals || {};
-        m.innerHTML = [
-          ['lessons_created', data.lessons_created ?? (data.lessons||[]).length],
-          ['playbook_size', data.playbook_size ?? (data.playbook||{}).playbook_size ?? '—'],
-          ['promoted', (data.playbook||{}).promoted_count ?? '—'],
-          ['avg lessons/battle', sig.avg_lessons_per_battle ?? '—'],
-          ['hole fights', sig.hole_protocol_fights ?? '—'],
-          ['judge live', data.judge_live_count ?? '—'],
-          ['judge splits', sig.judge_disagreements ?? '—'],
-        ].map(([k,v]) => `<div class="metric"><b>${v}</b><span class="muted">${k}</span></div>`).join('');
-      } catch (e) {
-        document.getElementById('standings').innerHTML = `<tr><td colspan="6" class="muted">Could not load snapshot: ${esc(e.message)}</td></tr>`;
-        document.getElementById('pbpPanel').textContent = 'Could not load play-by-play: ' + e.message;
-      }
+      const a = data.next_actions || [];
+      document.getElementById('actionsPanel').innerHTML =
+        a.map(x => `<li>${esc(x)}</li>`).join('') || '<li class="muted">—</li>';
+
+      const contribs = data.contributions || [];
+      document.getElementById('contribs').innerHTML = contribs.map(c => `
+        <article class="contrib">
+          <h3>
+            <span class="badge role">${esc(c.role)}</span>
+            <span class="badge ${esc(c.mode)}">${esc(c.mode)}</span>
+            <span class="muted">${esc(c.fighter_id)} · ${esc(c.provider)}</span>
+          </h3>
+          <div class="body">${esc(c.text)}</div>
+        </article>
+      `).join('') || '<div class="muted">No contributions</div>';
     }
 
-    async function loadReviews() {
-      const el = document.getElementById('reviews');
-      if (!el) return;
-      try {
-        let rows = [];
-        let res = await fetch('arena/data/reviews_index.json', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          rows = data.reviews || [];
-        } else {
-          res = await fetch('arena/data/review_feed.jsonl', { cache: 'no-store' });
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const text = await res.text();
-          rows = text.trim().split('\n').filter(Boolean).map(l => {
-            try { return JSON.parse(l); } catch { return null; }
-          }).filter(Boolean).reverse();
-        }
-        el.innerHTML = rows.slice(0, 12).map(r => {
-          const dec = (r.decision || r.final_verdict || '?');
-          const shares = r.shares || {};
-          const shareTxt = ['approve','revise','reject']
-            .map(k => `${k[0]}=${Math.round((shares[k]||0)*100)}%`).join(' ');
-          return `<div class="feed-item">
-            <span class="badge ${dec}">${dec}</span>
-            <strong style="margin-left:8px;">${esc(r.title || r.target || r.id)}</strong>
-            <span class="muted"> · ${esc(r.project_type || '')} · ${esc(r.ts || '')}</span>
-            <div class="muted" style="margin-top:4px;">${shareTxt} · n=${esc(r.n_reviews || '?')}</div>
-          </div>`;
-        }).join('') || 'No reviews yet — run <code>python3 run_arena.py --review samples/sample_project_brief.md</code>';
-      } catch (e) {
-        el.innerHTML = 'No review feed yet. Run <code>python3 run_arena.py --review TARGET</code> (' + esc(e.message) + ')';
-      }
+    function setNote(kind, html) {
+      const note = document.getElementById('runNote');
+      note.style.display = 'block';
+      note.className = 'note' + (kind ? ' ' + kind : '');
+      note.innerHTML = html;
     }
 
-    document.getElementById('fightBtn').addEventListener('click', async () => {
-      const note = document.getElementById('fightNote');
-      const btn = document.getElementById('fightBtn');
-      const prompt = document.getElementById('prompt').value.trim();
+    async function runWorkstation(refine) {
+      const briefEl = document.getElementById('brief');
+      const runBtn = document.getElementById('runBtn');
+      const refineBtn = document.getElementById('refineBtn');
       if (!apiLive) {
-        note.style.display = 'block';
-        note.className = 'note';
-        note.innerHTML = 'Live fights need the local server: <code>python3 run_arena.py --serve</code>. Static Pages cannot POST to <code>/api/battle</code>.';
+        setNote('', 'Live workstation needs the local server: <code>python3 run_arena.py --serve</code>. Static Pages cannot POST to <code>/api/workstation</code>.');
         return;
       }
-      btn.disabled = true;
-      note.style.display = 'block';
-      note.className = 'note';
-      note.textContent = prompt
-        ? 'Running 4-fighter FFA with dual judges…'
-        : 'No prompt — running hardest protocol FFA with rotated fighters…';
+      runBtn.disabled = true;
+      refineBtn.disabled = true;
+      setNote('', refine ? 'Refining with prior context…' : 'Running all six roles…');
+      const body = {
+        brief: briefEl.value,
+        hard: true,
+      };
+      if (refine && lastResult && lastResult.refine_context) {
+        body.refine_context = lastResult.refine_context;
+      }
       try {
-        const body = { prompt, hard: true };
-        const proto = document.getElementById('protocol').value;
-        if (proto) body.protocol_id = proto;
-        const res = await fetch('/api/battle', {
+        const res = await fetch('/api/workstation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
         const ct = (res.headers.get('content-type') || '').toLowerCase();
-        const raw = await res.text();
         let data;
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          throw new Error(
-            ct.includes('html') || raw.trimStart().startsWith('<')
-              ? 'Got HTML instead of JSON — open the local --serve URL (not GitHub Pages)'
-              : 'Invalid JSON from /api/battle'
-          );
+        if (ct.includes('application/json')) {
+          data = await res.json();
+        } else {
+          setNote('err', res.ok ? 'Invalid JSON from /api/workstation' : `HTTP ${res.status}`);
+          return;
         }
-        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-        note.className = 'note ok';
-        note.innerHTML = `Winner <strong>${esc(data.winner)}</strong> · ranking ${esc((data.ranking||[]).join(' › '))}` +
-          ((data.disagreement && data.disagreement.winner_mismatch) ? ' · <span style="color:var(--warn)">judge split</span>' : '');
-        await load();
+        if (!res.ok || data.error) {
+          setNote('err', esc(data.error || ('HTTP ' + res.status)));
+          return;
+        }
+        renderResult(data);
+        setNote('ok', `ok — ${ (data.contributions||[]).length } contributions` +
+          (data.used_default_brief ? ' (default brief)' : ''));
       } catch (e) {
-        note.className = 'note err';
-        note.textContent = 'Fight failed: ' + e.message;
+        setNote('err', esc(e.message || String(e)));
       } finally {
-        btn.disabled = false;
+        runBtn.disabled = false;
+        document.getElementById('refineBtn').disabled = !(lastResult && lastResult.refine_context);
       }
-    });
+    }
 
+    document.getElementById('runBtn').addEventListener('click', () => runWorkstation(false));
+    document.getElementById('refineBtn').addEventListener('click', () => runWorkstation(true));
     probeApi();
-    load();
-    loadReviews();
-    setInterval(load, 5000);
-    setInterval(loadReviews, 5000);
   </script>
 </body>
 </html>

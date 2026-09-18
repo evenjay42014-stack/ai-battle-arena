@@ -1,77 +1,55 @@
-# NEXUS — AI Battle Arena
+# NEXUS AI Workstation
 
-Every AI on one bus. They fight. Losses become doctrine.
+Command center where **all six live AI providers collaborate** to build and refine apps — not fight.
 
-NEXUS stress-tests language models in **4-fighter free-for-alls** across ten hard protocols. Each battle is scored by **two independent judges**. After every match losers (and weakness signals) get **lesson cards** that merge into a shared **playbook** injected into the next fight. The command center shows sports-style **play-by-play**.
+Roles rotate fairly across runs: **architect · implementer · critic · tester · ux · integrator**. Shared output includes a plan, patches/snippets, disagreements, and next actions. Empty brief → a strong default hard app-building task.
 
-This does **not** update model weights. Learning is playbook distillation and weakness mining.
+The legacy 4-fighter FFA / dual-judge / playbook engine is still in the repo (`--tournament`, `POST /api/battle`) but is not the main product flow.
 
 ## Quick start
 
 ```bash
 cp .env.example .env   # fill LIVE keys (never commit .env)
 python3 run_arena.py --live-check
-python3 run_arena.py --quick          # 2 FFA groups (DEMO or LIVE)
-python3 run_arena.py --tournament     # full hard curriculum
-python3 run_arena.py --review samples/sample_project_brief.md
 python3 run_arena.py --serve --port 8899
 ```
 
-Open `http://127.0.0.1:8899/view.html`. Use the **prompt bar** to launch a custom 4-way fight (POST `/api/battle`). `.env` and directory listings are blocked.
+Open `http://127.0.0.1:8899/view.html`. Use **Run workstation** (POST `/api/workstation`). Leave the brief blank for the default PulseBoard MVP. Use **Refine** to run again with prior context.
 
-On static GitHub Pages there is no API — the UI shows how to enable live fights with `--serve`, and still renders play-by-play from `arena/data/snapshot.json`.
+On static GitHub Pages there is no API — the UI explains how to enable live runs with `--serve`.
 
 ## Command center API (`--serve`)
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/battle` | JSON `{ "prompt": "...", "protocol_id?": "...", "hard?": true }` → run FFA, return ranking + play-by-play |
-| `GET` | `/api/snapshot` | Current standings / battles / playbook snapshot |
-| `GET` | `/api/history` | Recent battles (from `battles_history.jsonl` or snapshot) |
-
-## What's new (Command Center FFA)
-
-1. **Prompt bar** — custom challenges with a real fight loop (not a fake UI).
-2. **Hard protocols** — adversarial, multi-constraint tasks; `hard=True` by default.
-3. **4-fighter FFA** — ranked rounds; Elo from rank scores `1.0 / 0.66 / 0.33 / 0.0`; W-L counts 1st place as a win.
-4. **Dual judges** — two independent LIVE judges (heuristic fallback); disagreements surface in play-by-play and can emit lessons.
-5. **Play-by-play** — timeline: prompt → each answer → judge1/judge2 → ranking → lessons.
+| `POST` | `/api/workstation` | JSON `{ "brief?", "refine_context?", "hard?" }` → role contributions + plan |
+| `POST` | `/api/battle` | Legacy FFA (optional) |
+| `GET` | `/api/snapshot` | Legacy standings / battles snapshot |
+| `GET` | `/api/history` | Recent legacy battles |
 
 ## Env keys
 
 `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` / `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`
-
-## Learning loop
-
-1. Ten hard protocols hit each fighter's designed holes.
-2. Every battle emits dense lesson cards into `arena/data/playbook.json`.
-3. The next fight injects the playbook immediately.
-4. `--review` runs a multi-model council; disagreements become playbook lessons.
 
 ## CLI
 
 | Flag | Purpose |
 |---|---|
 | `--live-check` | Probe providers |
-| `--quick` | 2-group FFA smoke (persists playbook) |
-| `--tournament` | Full learning stress suite |
-| `--all-protocols` | Each group × all 10 (expensive) |
-| `--review TARGET` | Council review of a path, URL, or brief |
-| `--review-max N` | Cap fighters for a review smoke |
-| `--reviews` | List recent project reviews |
-| `--serve` | Command center + battle API |
+| `--serve` | Workstation UI + `/api/workstation` (+ legacy `/api/battle`) |
+| `--quick` | Legacy 2-group FFA smoke |
+| `--tournament` | Legacy full learning stress suite |
+| `--review TARGET` | Legacy council review |
 
 ## Layout
 
 ```
 run_arena.py
-view.html
-arena/agents.py
-arena/engine.py
-arena/protocols.py
-arena/playbook.py
-arena/review_council.py
-arena/live.py
-arena/data/          snapshot, playbook, battles_history, reviews
-samples/             example review brief
+view.html          # workstation UI entry
+index.html         # redirect → view.html
+arena/workstation.py
+arena/agents.py    # LIVE wiring (xai/openai/anthropic/google/deepseek/openrouter)
+arena/engine.py    # legacy FFA (kept)
+arena/data/        # snapshot, playbook, workstation_history.jsonl
+samples/
 ```
