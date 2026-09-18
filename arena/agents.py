@@ -79,7 +79,7 @@ _DIRECT_MODELS: dict[str, list[str]] = {
         "claude-sonnet-4-5-20250929",
         "claude-3-haiku-20240307",
     ],
-    "google": ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"],
+    "google": ["gemini-3.6-flash", "gemini-flash-latest", "gemini-3-flash-preview"],
     "deepseek": ["deepseek-chat", "deepseek-flash"],
 }
 
@@ -92,7 +92,7 @@ _OPENROUTER_MODELS: dict[str, list[str]] = {
         "anthropic/claude-3-haiku",
     ],
     "openai": ["openai/gpt-4o-mini", "openai/gpt-4.1-mini"],
-    "google": ["google/gemini-2.5-flash", "google/gemini-flash-1.5"],
+    "google": ["google/gemini-3.6-flash", "google/gemini-3-flash-preview", "google/gemini-2.5-flash"],
     "deepseek": ["deepseek/deepseek-chat", "deepseek/deepseek-v3.2"],
     "openrouter": [
         "meta-llama/llama-4-maverick",
@@ -533,7 +533,8 @@ def _google_chat(
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", errors="replace")[:300]
             last_err = _redact(f"model={model} HTTP {e.code}: {raw}")
-            if "model" in raw.lower() or e.code == 404:
+            # 404/retired model, rate limit, or transient capacity — try next model
+            if "model" in raw.lower() or e.code in (404, 429, 503):
                 continue
             break
         except Exception as e:  # noqa: BLE001

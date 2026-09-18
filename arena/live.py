@@ -18,7 +18,7 @@ ANTHROPIC_MODELS = (
     "claude-sonnet-4-5-20250929",
     "claude-3-haiku-20240307",
 )
-GOOGLE_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+GOOGLE_MODELS = ("gemini-3.6-flash", "gemini-flash-latest", "gemini-3-flash-preview")
 DEEPSEEK_MODELS = ("deepseek-chat", "deepseek-flash")
 OPENROUTER_MODELS = ("openrouter/auto", "openai/gpt-4o-mini")
 

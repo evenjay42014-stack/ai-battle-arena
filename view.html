@@ -206,9 +206,14 @@
         const res = await fetch('/api/snapshot', { cache: 'no-store' });
         const ct = (res.headers.get('content-type') || '').toLowerCase();
         // GitHub Pages returns HTML 404 for /api/* — never treat that as live API
-        if (ct.includes('text/html')) {
+        if (ct.includes('text/html') || !ct.includes('application/json')) {
           apiLive = false;
           el.textContent = 'static Pages — use --serve for live API';
+          return;
+        }
+        if (!res.ok) {
+          apiLive = false;
+          el.textContent = 'API error ' + res.status + ' — check --serve';
           return;
         }
         apiLive = true;
