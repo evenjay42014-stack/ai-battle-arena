@@ -166,22 +166,22 @@
       const btn = document.getElementById('fightBtn');
       try {
         const res = await fetch('/api/snapshot', { cache: 'no-store' });
-        if (res.ok || res.status === 404) {
-          apiLive = true;
-          status.textContent = 'API online — live fights enabled';
-          status.style.color = 'var(--live)';
-          btn.disabled = false;
-          note.style.display = 'none';
-          return;
-        }
-        throw new Error('no api');
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        // GitHub Pages returns HTML 404 for /api/* — never treat that as live API
+        if (!res.ok || !ct.includes('application/json')) throw new Error('no api');
+        await res.json();
+        apiLive = true;
+        status.textContent = 'API online — live fights enabled';
+        status.style.color = 'var(--live)';
+        btn.disabled = false;
+        note.style.display = 'none';
       } catch {
         apiLive = false;
         status.textContent = 'static mode (no API)';
         status.style.color = 'var(--demo)';
         note.style.display = 'block';
         note.className = 'note';
-        note.innerHTML = 'Static GitHub Pages cannot run fights. Start the command center with <code>python3 run_arena.py --serve</code> then open the local URL to use the prompt bar. Play-by-play below still renders from <code>arena/data/snapshot.json</code>.';
+        note.innerHTML = 'Static GitHub Pages cannot run fights. Start the command center with <code>python3 run_arena.py --serve</code> then open <code>http://127.0.0.1:8765/view.html</code>. Play-by-play below still renders from <code>arena/data/snapshot.json</code>.';
         btn.disabled = false; // still clickable to show the note
       }
     }
@@ -299,7 +299,18 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        const raw = await res.text();
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          throw new Error(
+            ct.includes('html') || raw.trimStart().startsWith('<')
+              ? 'Got HTML instead of JSON — open the local --serve URL (not GitHub Pages)'
+              : 'Invalid JSON from /api/battle'
+          );
+        }
         if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
         note.className = 'note ok';
         note.innerHTML = `Winner <strong>${esc(data.winner)}</strong> · ranking ${esc((data.ranking||[]).join(' › '))}` +
