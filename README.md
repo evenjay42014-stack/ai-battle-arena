@@ -14,7 +14,7 @@ python3 run_arena.py --live-check
 python3 run_arena.py --serve --port 8899
 ```
 
-Open `http://127.0.0.1:8899/view.html`. Use **Run workstation** (POST `/api/workstation`). Leave the brief blank for the default PulseBoard MVP. Use **Refine** to run again with prior context.
+Open `http://127.0.0.1:8899/view.html`. Use **Run workstation** (POST `/api/workstation`). Leave the brief blank for the default PulseBoard MVP. Use **Refine** to run again with prior context. Attach images and text/code/pdf/zip via the file picker (JSON base64; ≤8 MB decoded total).
 
 On static GitHub Pages there is no API — the UI explains how to enable live runs with `--serve`.
 
@@ -22,7 +22,7 @@ On static GitHub Pages there is no API — the UI explains how to enable live ru
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/workstation` | JSON `{ "brief?", "refine_context?", "hard?" }` → role contributions + plan |
+| `POST` | `/api/workstation` | JSON `{ "brief?", "refine_context?", "hard?", "attachments?" }` → role contributions + plan. Attachments: `[{name, mime, data_b64}]` (≤8 MB decoded). Text inlined into brief; images sent to vision-capable providers (openai/anthropic/google/xai/openrouter); deepseek gets text stub only. |
 | `POST` | `/api/battle` | Legacy FFA (optional) |
 | `GET` | `/api/snapshot` | Legacy standings / battles snapshot |
 | `GET` | `/api/history` | Recent legacy battles |

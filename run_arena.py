@@ -223,7 +223,7 @@ def cmd_serve(port: int) -> int:
             if path == "/api/workstation":
                 return self._send_json(
                     405,
-                    {"error": "Use POST /api/workstation with JSON {brief?, refine_context?, hard?}"},
+                    {"error": "Use POST /api/workstation with JSON {brief?, refine_context?, hard?, attachments?}"},
                 )
             if path == "/api/battle":
                 return self._send_json(
@@ -247,16 +247,24 @@ def cmd_serve(port: int) -> int:
                 refine_context = body.get("refine_context")
                 if refine_context is not None and not isinstance(refine_context, dict):
                     return self._send_json(400, {"error": "refine_context must be an object"})
+                attachments = body.get("attachments")
+                if attachments is not None and not isinstance(attachments, list):
+                    return self._send_json(
+                        400, {"error": "attachments must be a list of {name, mime, data_b64}"}
+                    )
                 hard = body.get("hard", True)
                 try:
-                    from arena.workstation import run_workstation
+                    from arena.workstation import AttachmentError, run_workstation
 
                     out = run_workstation(
                         brief,
                         refine_context=refine_context,
+                        attachments=attachments,
                         hard=bool(hard),
                         prefer_live=True,
                     )
+                except AttachmentError as e:
+                    return self._send_json(400, {"error": str(e)})
                 except Exception as e:  # noqa: BLE001
                     return self._send_json(500, {"error": str(e)})
                 return self._send_json(200, out)
