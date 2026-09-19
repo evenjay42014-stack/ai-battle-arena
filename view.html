@@ -42,13 +42,39 @@
     }
     .note.ok { background:rgba(61,220,151,.08); border-color:rgba(61,220,151,.35); color:var(--live); }
     .note.err { background:rgba(255,90,90,.08); border-color:rgba(255,90,90,.35); color:var(--warn); }
-    .contrib-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+    .contrib-grid { display:grid; gap:14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
     .contrib {
-      background:#0a1018; border:1px solid var(--line); border-radius:12px; padding:12px 14px;
-      display:flex; flex-direction:column; gap:8px; min-height:140px;
+      background:#0a1018; border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+      display:flex; flex-direction:column; gap:8px; min-height:160px;
+      box-shadow:0 0 0 1px rgba(110,168,254,.06);
     }
-    .contrib h3 { margin:0; font-size:14px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-    .contrib .body { font-size:13px; line-height:1.45; white-space:pre-wrap; color:#d5deea; flex:1; max-height:280px; overflow:auto; }
+    .contrib.has-error { border-color:rgba(255,122,122,.55); box-shadow:0 0 0 1px rgba(255,122,122,.2); }
+    .contrib h3 { margin:0; font-size:15px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .contrib .fighter { font-weight:700; color:var(--text); }
+    .contrib .lab { color:var(--accent); font-size:12px; font-weight:600; }
+    .contrib .body {
+      font-size:13px; line-height:1.45; white-space:pre-wrap; color:#d5deea; flex:1;
+      max-height:220px; overflow:auto; background:#070b10; border-radius:8px; padding:10px;
+      border:1px solid rgba(36,48,65,.8);
+    }
+    .contrib details.expand { margin-top:2px; }
+    .contrib details.expand summary {
+      cursor:pointer; color:var(--accent); font-size:12px; font-weight:600; user-select:none;
+    }
+    .contrib .full-body {
+      margin-top:8px; font-size:13px; line-height:1.45; white-space:pre-wrap; color:#d5deea;
+      max-height:480px; overflow:auto; background:#070b10; border-radius:8px; padding:10px;
+      border:1px solid var(--line);
+    }
+    .contrib .err-banner {
+      font-size:12px; line-height:1.4; color:var(--warn);
+      background:rgba(255,122,122,.1); border:1px solid rgba(255,122,122,.35);
+      border-radius:8px; padding:8px 10px; white-space:pre-wrap;
+    }
+    .count-pill {
+      display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px;
+      font-size:12px; font-weight:700; background:rgba(110,168,254,.15); color:var(--accent);
+    }
     .panel-list { margin:0; padding-left:18px; font-size:13px; line-height:1.5; }
     .panel-list li { margin-bottom:6px; }
     details.legacy { border-top:1px dashed var(--line); margin-top:8px; padding-top:8px; }
@@ -108,24 +134,33 @@
       <p class="muted" id="metaLine"></p>
     </section>
 
+    <section class="card wide" id="resultsCard">
+      <h2 style="margin:0 0 6px; font-size:18px;">
+        All 6 agent results
+        <span class="count-pill" id="contribCount">0 / 6</span>
+      </h2>
+      <p class="muted" style="margin-bottom:12px;">
+        Every provider contributes on the same brief (roles rotate; nobody is skipped).
+        Cards show fighter · lab · LIVE|DEMO · role · full output · LIVE errors.
+      </p>
+      <div class="contrib-grid" id="contribs">
+        <div class="muted">No run yet — click Run workstation.</div>
+      </div>
+    </section>
+
     <section class="card">
       <h2 style="margin:0 0 10px; font-size:16px;">Shared plan</h2>
       <pre class="plan" id="planPanel"><span class="muted">Run the workstation to synthesize a plan.</span></pre>
     </section>
 
     <section class="card">
-      <h2 style="margin:0 0 10px; font-size:16px;">Disagreements &amp; next actions</h2>
-      <h3 style="margin:0 0 6px; font-size:13px; color:var(--muted);">Disagreements</h3>
+      <h2 style="margin:0 0 10px; font-size:16px;">Patches, disagreements &amp; next actions</h2>
+      <h3 style="margin:0 0 6px; font-size:13px; color:var(--muted);">Combined patches</h3>
+      <ul class="panel-list" id="patchesPanel"><li class="muted">—</li></ul>
+      <h3 style="margin:14px 0 6px; font-size:13px; color:var(--muted);">Disagreements</h3>
       <ul class="panel-list" id="disagreePanel"><li class="muted">—</li></ul>
       <h3 style="margin:14px 0 6px; font-size:13px; color:var(--muted);">Next actions</h3>
       <ul class="panel-list" id="actionsPanel"><li class="muted">—</li></ul>
-    </section>
-
-    <section class="card wide">
-      <h2 style="margin:0 0 12px; font-size:16px;">Role contributions</h2>
-      <div class="contrib-grid" id="contribs">
-        <div class="muted">No run yet.</div>
-      </div>
     </section>
 
     <section class="card wide">
@@ -230,11 +265,20 @@
       document.getElementById('metaCard').style.display = 'block';
       const live = data.live_count ?? 0;
       const demo = data.demo_count ?? 0;
+      const errs = data.error_count ?? (data.contributions || []).filter(c => c.error).length;
       const def = data.used_default_brief ? ' · default brief' : '';
+      const n = (data.contributions || []).length;
       document.getElementById('metaLine').textContent =
-        `${data.ts || ''} · ${live} LIVE / ${demo} DEMO · rotation ${data.rotation_index ?? '?'}${def}`;
+        `${data.ts || ''} · ${n}/6 contributions · ${live} LIVE / ${demo} DEMO` +
+        (errs ? ` · ${errs} LIVE error(s)` : '') +
+        ` · rotation ${data.rotation_index ?? '?'}${def}`;
+      document.getElementById('contribCount').textContent = `${n} / 6`;
 
       document.getElementById('planPanel').textContent = data.plan || '—';
+
+      const p = data.patches || [];
+      document.getElementById('patchesPanel').innerHTML =
+        p.map(x => `<li>${esc(x)}</li>`).join('') || '<li class="muted">—</li>';
 
       const d = data.disagreements || [];
       document.getElementById('disagreePanel').innerHTML =
@@ -245,16 +289,29 @@
         a.map(x => `<li>${esc(x)}</li>`).join('') || '<li class="muted">—</li>';
 
       const contribs = data.contributions || [];
-      document.getElementById('contribs').innerHTML = contribs.map(c => `
-        <article class="contrib">
+      document.getElementById('contribs').innerHTML = contribs.map(c => {
+        const hasErr = !!c.error;
+        const preview = String(c.text || '');
+        const short = preview.length > 500 ? preview.slice(0, 500) + '…' : preview;
+        const needsExpand = preview.length > 500;
+        return `
+        <article class="contrib${hasErr ? ' has-error' : ''}">
           <h3>
-            <span class="badge role">${esc(c.role)}</span>
-            <span class="badge ${esc(c.mode)}">${esc(c.mode)}</span>
-            <span class="muted">${esc(c.fighter_id)} · ${esc(c.provider)}</span>
+            <span class="fighter">${esc(c.fighter_id)}</span>
+            <span class="lab">${esc(c.lab || c.provider || '')}</span>
+            <span class="badge ${esc(c.mode || 'DEMO')}">${esc(c.mode || 'DEMO')}</span>
+            <span class="badge role">${esc(c.title || c.role)}</span>
           </h3>
-          <div class="body">${esc(c.text)}</div>
-        </article>
-      `).join('') || '<div class="muted">No contributions</div>';
+          <div class="muted" style="font-size:12px;">provider=${esc(c.provider)} · role=${esc(c.role)}</div>
+          ${hasErr ? `<div class="err-banner" role="alert"><strong>LIVE failed:</strong> ${esc(c.error)}</div>` : ''}
+          <div class="body">${esc(short)}</div>
+          ${needsExpand || hasErr ? `
+          <details class="expand">
+            <summary>Show full output</summary>
+            <div class="full-body">${esc(preview)}</div>
+          </details>` : ''}
+        </article>`;
+      }).join('') || '<div class="muted">No contributions</div>';
     }
 
     function setNote(kind, html) {
@@ -317,9 +374,13 @@
         renderResult(data);
         const nAtt = (data.attachments && data.attachments.attachment_meta)
           ? data.attachments.attachment_meta.length : (attachments.length || 0);
-        setNote('ok', `ok — ${ (data.contributions||[]).length } contributions` +
+        const nC = (data.contributions||[]).length;
+        const nErr = data.error_count ?? (data.contributions||[]).filter(c => c.error).length;
+        setNote('ok', `ok — ${nC}/6 agent results` +
           (data.used_default_brief ? ' (default brief)' : '') +
-          (nAtt ? ` · ${nAtt} attachment(s)` : ''));
+          (nAtt ? ` · ${nAtt} attachment(s)` : '') +
+          (nErr ? ` · ${nErr} LIVE error(s) shown on cards` : '') +
+          (refine ? ' · refine pass used prior outputs' : ''));
       } catch (e) {
         setNote('err', esc(e.message || String(e)));
       } finally {

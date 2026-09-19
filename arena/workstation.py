@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from arena.agents import Fighter, build_roster
+from arena.agents import DEMO_PERSONAS, Fighter, build_roster
 from arena.env_loader import load_dotenv, repo_root
 
 # Total decoded attachment payload cap (sum of raw bytes after base64 decode).
@@ -355,26 +355,78 @@ def _rotation_index() -> int:
     return n
 
 
+def ensure_full_roster(roster: list[Fighter] | None = None, *, prefer_live: bool = True) -> list[Fighter]:
+    """Guarantee exactly one fighter per lab/provider (len == 6).
+
+    Pads from DEMO_PERSONAS if build_roster ever returns fewer; never skips a
+    provider that belongs on the workstation. Role rotation remaps roles only —
+    every roster member still contributes.
+    """
+    base = list(roster) if roster is not None else build_roster(prefer_live=prefer_live)
+    by_provider: dict[str, Fighter] = {}
+    for f in base:
+        # Keep first sighting of each provider (stable order from DEMO_PERSONAS).
+        if f.provider not in by_provider:
+            by_provider[f.provider] = f
+
+    out: list[Fighter] = []
+    for persona in DEMO_PERSONAS:
+        prov = persona["provider"]
+        if prov in by_provider:
+            out.append(by_provider.pop(prov))
+            continue
+        # Pad missing provider as DEMO so Run still attempts 6 contributions.
+        out.append(
+            Fighter(
+                id=persona["id"],
+                lab=persona["lab"],
+                provider=persona["provider"],
+                spike=persona["spike"],
+                hole=persona["hole"],
+                style=persona["style"],
+                mode="DEMO",
+            )
+        )
+    if len(out) != 6:
+        raise RuntimeError(f"ensure_full_roster expected 6 fighters, got {len(out)}")
+    return out
+
+
 def assign_roles(
     roster: list[Fighter],
     rotation_index: int | None = None,
 ) -> dict[str, Fighter]:
     """Map ROLES → fighters with fair rotation so no provider is stuck in one role.
 
-    rotation_index shifts which fighter gets which role. With 6 fighters and 6 roles,
-    each full cycle of 6 runs gives every fighter every role once.
+    Always includes every roster member when len(roster)==6 (one role each).
+    rotation_index shifts which fighter gets which role; a full cycle of 6 runs
+    gives every fighter every role once. Never skips a fighter to shrink the map.
     """
-    if not roster:
-        raise ValueError("roster is empty")
+    roster = ensure_full_roster(roster)
     idx = _rotation_index() if rotation_index is None else int(rotation_index)
     n = len(roster)
     roles = list(ROLES)
-    # If roster shorter than roles, cycle fighters; if longer, use first len(roles).
     mapping: dict[str, Fighter] = {}
     for i, role in enumerate(roles):
         fighter = roster[(i + idx) % n]
         mapping[role] = fighter
+    # Invariant: 6 roles, 6 distinct fighters (one per provider/lab).
+    ids = [f.id for f in mapping.values()]
+    if len(mapping) != 6 or len(set(ids)) != 6:
+        raise RuntimeError(
+            f"assign_roles must map 6 distinct fighters, got {len(mapping)} roles / "
+            f"{len(set(ids))} ids: {ids}"
+        )
     return mapping
+
+
+def _extract_error(text: str) -> str | None:
+    """Surface LIVE failures as a dedicated field for the UI."""
+    t = (text or "").strip()
+    for prefix in ("[LIVE ERROR]", "[ERROR]"):
+        if t.startswith(prefix):
+            return t[len(prefix):].strip() or t
+    return None
 
 
 def default_brief(*, hard: bool = True) -> str:
@@ -463,15 +515,18 @@ def _demo_enrich(fighter: Fighter, role: str, brief: str) -> str:
 def _synthesize(
     contributions: list[dict[str, Any]],
     brief: str,
-) -> tuple[str, list[str], list[str]]:
-    """Build shared plan, disagreements, next_actions from role outputs (no extra API)."""
+) -> tuple[str, list[str], list[str], list[str]]:
+    """Build shared plan, patches, disagreements, next_actions from all six role outputs."""
     by_role = {c["role"]: c for c in contributions}
     arch = (by_role.get("architect") or {}).get("text", "")
     impl = (by_role.get("implementer") or {}).get("text", "")
     integ = (by_role.get("integrator") or {}).get("text", "")
+    ux_t = (by_role.get("ux") or {}).get("text", "")
+    test_t = (by_role.get("tester") or {}).get("text", "")
+    critic_t = (by_role.get("critic") or {}).get("text", "")
 
     plan_bits = [
-        "Shared plan (synthesized from all six roles):",
+        "Shared plan (synthesized from all six providers/roles):",
         "1. Architect sets modules + data model.",
         "2. Implementer lands MVP skeleton + key snippets.",
         "3. UX defines primary flows and empty states.",
@@ -479,45 +534,73 @@ def _synthesize(
         "5. Critic cuts scope and flags security gaps.",
         "6. Integrator publishes runbook + ship checklist.",
     ]
-    if arch:
-        plan_bits.append(f"Architect signal: {arch[:220].rstrip()}…")
-    if impl:
-        plan_bits.append(f"Implementer signal: {impl[:220].rstrip()}…")
+    for role_key, label, blob in (
+        ("architect", "Architect", arch),
+        ("implementer", "Implementer", impl),
+        ("ux", "UX", ux_t),
+        ("tester", "Tester", test_t),
+        ("critic", "Critic", critic_t),
+        ("integrator", "Integrator", integ),
+    ):
+        if blob:
+            plan_bits.append(f"{label} signal: {blob[:200].rstrip()}…")
     plan = "\n".join(plan_bits)
 
+    patches: list[str] = []
+    if impl:
+        patches.append(f"Implementer patch cues: {impl[:280].rstrip()}…")
+    if arch:
+        patches.append(f"Architecture seam to land first: {arch[:200].rstrip()}…")
+    if integ:
+        patches.append(f"Integration / runbook patch: {integ[:200].rstrip()}…")
+    if ux_t:
+        patches.append(f"UX copy/flow patch: {ux_t[:180].rstrip()}…")
+    if not patches:
+        patches.append(
+            "No concrete patches yet — Refine with prior outputs so all six improve specificity."
+        )
+
     disagreements: list[str] = []
-    critic_t = (by_role.get("critic") or {}).get("text", "")
     if critic_t and impl:
         disagreements.append(
             "Critic vs Implementer: watch scope — critic wants cuts; implementer may over-build. "
             "Prefer smallest runnable path first."
         )
-    if (by_role.get("ux") or {}).get("text") and (by_role.get("tester") or {}).get("text"):
+    if ux_t and test_t:
         disagreements.append(
             "UX vs Tester: polish vs coverage — ship flows that have acceptance tests; "
             "defer theme/animation."
         )
+    if arch and critic_t:
+        disagreements.append(
+            "Architect vs Critic: validate must-haves against critic cuts before locking modules."
+        )
+    live_errs = [c for c in contributions if c.get("error")]
+    if live_errs:
+        names = ", ".join(f"{c.get('fighter_id')} ({c.get('role')})" for c in live_errs[:4])
+        disagreements.append(
+            f"Provider gaps: {names} returned LIVE errors — treat those role outputs as incomplete."
+        )
     if not disagreements:
         disagreements.append(
-            "No hard conflict detected in DEMO synthesis — refine pass can surface sharper tradeoffs."
+            "No hard conflict detected — refine pass can surface sharper tradeoffs across all six."
         )
 
     next_actions = [
         "Confirm v0 scope (must-haves only) from Critic cuts.",
-        "Scaffold backend + SQLite schema from Architect/Implementer notes.",
-        "Wire board UI + refresh from UX flow.",
-        "Run Tester smoke checklist; fix XSS and persistence gaps.",
-        "Publish Integrator README runbook; optionally Refine with this context.",
+        "Scaffold backend + schema from Architect/Implementer notes.",
+        "Wire primary UI flow from UX; attach Tester acceptance checks.",
+        "Fix any LIVE errors, then Refine so all six improve the same ask.",
+        "Publish Integrator README runbook + smoke checklist.",
     ]
     if integ:
         next_actions.insert(0, f"Integrator cue: {integ[:160].rstrip()}…")
 
-    # Brief title hint
     title_line = brief.strip().splitlines()[0] if brief.strip() else ""
     if title_line:
         next_actions.append(f"Keep working toward: {title_line.lstrip('#').strip()[:80]}")
 
-    return plan, disagreements, next_actions
+    return plan, patches, disagreements, next_actions
 
 
 def _persist_history(record: dict[str, Any]) -> None:
@@ -568,7 +651,7 @@ def run_workstation(
         text_brief = text_brief.rstrip() + processed["brief_extra"]
 
     images = processed["images"]
-    roster = build_roster(prefer_live=prefer_live)
+    roster = ensure_full_roster(build_roster(prefer_live=prefer_live), prefer_live=prefer_live)
     role_map_fighters = assign_roles(roster, rotation_index=rotation_index)
     role_map = {
         role: {"fighter_id": f.id, "provider": f.provider, "lab": f.lab, "mode": f.mode}
@@ -580,6 +663,7 @@ def run_workstation(
         system = ROLE_DEFS[role]["system"]
         user = _build_user_prompt(role, text_brief, refine_context=refine_context)
         vision = images if fighter.provider in VISION_PROVIDERS else None
+        err: str | None = None
         if fighter.mode == "DEMO":
             out = _demo_enrich(fighter, role, text_brief)
             if images:
@@ -589,6 +673,9 @@ def run_workstation(
                 out = fighter.answer(user, system=system, images=vision)
             except Exception as e:  # noqa: BLE001
                 out = f"[ERROR] {fighter.id}: {e}"
+                err = str(e)
+            if err is None:
+                err = _extract_error(out)
         contributions.append(
             {
                 "role": role,
@@ -598,19 +685,34 @@ def run_workstation(
                 "lab": fighter.lab,
                 "mode": fighter.mode,
                 "text": out,
+                "error": err,
             }
         )
 
-    plan, disagreements, next_actions = _synthesize(contributions, text_brief)
+    if len(contributions) != 6:
+        raise RuntimeError(f"run_workstation must yield 6 contributions, got {len(contributions)}")
+    ids = [c["fighter_id"] for c in contributions]
+    if len(set(ids)) != 6:
+        raise RuntimeError(f"run_workstation requires 6 distinct fighter ids, got {ids}")
 
-    # Context for a subsequent refine pass (slim)
+    plan, patches, disagreements, next_actions = _synthesize(contributions, text_brief)
+
+    # Context for a subsequent refine pass (slim) — includes all 6 prior outputs
     out_refine = {
         "brief": text_brief,
         "plan": plan,
+        "patches": patches,
         "next_actions": next_actions,
         "disagreements": disagreements,
         "contributions": [
-            {"role": c["role"], "fighter_id": c["fighter_id"], "text": c["text"][:800]}
+            {
+                "role": c["role"],
+                "fighter_id": c["fighter_id"],
+                "lab": c["lab"],
+                "mode": c["mode"],
+                "text": c["text"][:800],
+                "error": c.get("error"),
+            }
             for c in contributions
         ],
         "role_map": role_map,
@@ -630,7 +732,9 @@ def run_workstation(
         "brief": text_brief,
         "used_default_brief": used_default,
         "contributions": contributions,
+        "contribution_count": len(contributions),
         "plan": plan,
+        "patches": patches,
         "disagreements": disagreements,
         "next_actions": next_actions,
         "refine_context": out_refine,
@@ -640,6 +744,7 @@ def run_workstation(
         ),
         "live_count": sum(1 for c in contributions if c["mode"] == "LIVE"),
         "demo_count": sum(1 for c in contributions if c["mode"] == "DEMO"),
+        "error_count": sum(1 for c in contributions if c.get("error")),
         "attachments": vision_note,
     }
 
@@ -660,6 +765,7 @@ __all__ = [
     "MAX_ATTACHMENTS_DECODED",
     "VISION_PROVIDERS",
     "AttachmentError",
+    "ensure_full_roster",
     "assign_roles",
     "default_brief",
     "process_attachments",
